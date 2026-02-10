@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import typer
 from loguru import logger
 from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -13,6 +14,12 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.cli_command_parser import (
+    CommandInfo,
+    extract_typer_commands,
+    get_default_telegram_commands,
+    execute_cli_command,
+)
 from nanobot.config.schema import TelegramConfig
 
 if TYPE_CHECKING:
@@ -85,87 +92,159 @@ def _markdown_to_telegram_html(text: str) -> str:
 class TelegramChannel(BaseChannel):
     """
     Telegram channel using long polling.
-    
+
     Simple and reliable - no webhook/public IP needed.
     """
-    
+
     name = "telegram"
-    
-    # Commands registered with Telegram's command menu
-    BOT_COMMANDS = [
+
+    # Basic bot commands (always available)
+    BASIC_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("reset", "Reset conversation history"),
         BotCommand("help", "Show available commands"),
     ]
-    
+
     def __init__(
         self,
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
         session_manager: SessionManager | None = None,
+        cli_app: typer.Typer | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
         self.session_manager = session_manager
+        self.cli_app = cli_app  # Typer app for dynamic commands
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
+        self._cli_commands: dict[str, CommandInfo] = {}  # name -> CommandInfo
     
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
         if not self.config.token:
             logger.error("Telegram bot token not configured")
             return
-        
+
         self._running = True
-        
+
         # Build the application
         builder = Application.builder().token(self.config.token)
         if self.config.proxy:
             builder = builder.proxy(self.config.proxy).get_updates_proxy(self.config.proxy)
         self._app = builder.build()
-        
-        # Add command handlers
+
+        # Add basic command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("reset", self._on_reset))
         self._app.add_handler(CommandHandler("help", self._on_help))
-        
+
+        # Build and register dynamic CLI commands
+        await self._register_cli_commands()
+
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL) 
-                & ~filters.COMMAND, 
+                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL)
+                & ~filters.COMMAND,
                 self._on_message
             )
         )
-        
+
         logger.info("Starting Telegram bot (polling mode)...")
-        
+
         # Initialize and start polling
         await self._app.initialize()
         await self._app.start()
-        
+
         # Get bot info and register command menu
         bot_info = await self._app.bot.get_me()
         logger.info(f"Telegram bot @{bot_info.username} connected")
-        
+
         try:
-            await self._app.bot.set_my_commands(self.BOT_COMMANDS)
-            logger.debug("Telegram bot commands registered")
+            commands = self._build_command_list()
+            await self._app.bot.set_my_commands(commands)
+            logger.debug(f"Registered {len(commands)} bot commands")
         except Exception as e:
             logger.warning(f"Failed to register bot commands: {e}")
-        
+
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
             allowed_updates=["message"],
             drop_pending_updates=True  # Ignore old messages on startup
         )
-        
+
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
+
+    async def _register_cli_commands(self) -> None:
+        """Extract and register handlers for CLI commands."""
+        if not self.cli_app:
+            logger.debug("No CLI app provided, skipping dynamic command registration")
+            return
+
+        # Extract all commands from Typer app
+        try:
+            cli_commands = extract_typer_commands(self.cli_app)
+            logger.debug(f"Extracted {len(cli_commands)} CLI commands from Typer app")
+        except Exception as e:
+            logger.warning(f"Failed to extract CLI commands: {e}")
+            return
+
+        # Store safe commands (no args required)
+        for cmd in cli_commands:
+            if not cmd.takes_args:  # Only register commands that don't need args
+                self._cli_commands[cmd.name] = cmd
+                # Register handler
+                self._app.add_handler(
+                    CommandHandler(cmd.name, self._on_cli_command)
+                )
+                logger.debug(f"Registered CLI command: /{cmd.name} - {cmd.description}")
+
+    def _build_command_list(self) -> list[BotCommand]:
+        """Build the complete list of Telegram bot commands."""
+        commands = list(self.BASIC_COMMANDS)
+
+        # Add safe CLI commands
+        for cmd_name, cmd_info in self._cli_commands.items():
+            desc = cmd_info.description
+            if cmd_info.subcommand_group:
+                desc = f"[{cmd_info.subcommand_group}] {desc}"
+            commands.append(BotCommand(cmd_name, desc))
+
+        return commands
+
+    async def _on_cli_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle dynamic CLI commands from Typer."""
+        if not update.message:
+            return
+
+        command_name = update.message.text.lstrip("/")  # Remove leading slash
+        args = context.args or []
+
+        if command_name not in self._cli_commands:
+            await update.message.reply_text(f"Unknown command: /{command_name}")
+            return
+
+        cmd_info = self._cli_commands[command_name]
+
+        # Execute the command
+        try:
+            result = await execute_cli_command(cmd_info, args)
+            # Send result (may need truncation if too long)
+            if len(result) > 4000:  # Telegram message limit
+                result = result[:4000] + "\n... (truncated)"
+            await update.message.reply_text(
+                f"📋 <b>{command_name}</b>\n\n{result}",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Error executing CLI command /{command_name}: {e}")
+            await update.message.reply_text(f"❌ Error: {e}")
     
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -212,7 +291,7 @@ class TelegramChannel(BaseChannel):
                     text=msg.content
                 )
             except Exception as e2:
-                logger.error(f"Error sending Telegram message: {e2}")
+                logger.error(f"Error sending Telegram message: {e2}  msg.len={len(msg.content)}")
     
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -251,14 +330,26 @@ class TelegramChannel(BaseChannel):
         """Handle /help command — show available commands."""
         if not update.message:
             return
-        
-        help_text = (
-            "🐈 <b>nanobot commands</b>\n\n"
-            "/start — Start the bot\n"
-            "/reset — Reset conversation history\n"
-            "/help — Show this help message\n\n"
-            "Just send me a text message to chat!"
-        )
+
+        help_lines = [
+            "🐈 <b>nanobot commands</b>\n\n",
+            "<b>Basic Commands:</b>",
+            "• /start — Start the bot",
+            "• /reset — Reset conversation history",
+            "• /help — Show this help message",
+        ]
+
+        # Add CLI commands if available
+        if self._cli_commands:
+            help_lines.append("\n<b>Status Commands:</b>")
+            for cmd_name, cmd_info in sorted(self._cli_commands.items()):
+                desc = cmd_info.description
+                if cmd_info.subcommand_group:
+                    help_lines.append(f"• /{cmd_name} — {desc}")
+
+        help_lines.append("\n💬 Just send me a text message to chat!")
+
+        help_text = "\n".join(help_lines)
         await update.message.reply_text(help_text, parse_mode="HTML")
     
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

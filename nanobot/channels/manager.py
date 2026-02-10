@@ -19,25 +19,32 @@ if TYPE_CHECKING:
 class ChannelManager:
     """
     Manages chat channels and coordinates message routing.
-    
+
     Responsibilities:
     - Initialize enabled channels (Telegram, WhatsApp, etc.)
     - Start/stop channels
     - Route outbound messages
     """
-    
-    def __init__(self, config: Config, bus: MessageBus, session_manager: "SessionManager | None" = None):
+
+    def __init__(
+        self,
+        config: Config,
+        bus: MessageBus,
+        session_manager: "SessionManager | None" = None,
+        cli_app: Any = None,  # typer.Typer app for dynamic commands
+    ):
         self.config = config
         self.bus = bus
         self.session_manager = session_manager
+        self.cli_app = cli_app
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
-        
+
         self._init_channels()
     
     def _init_channels(self) -> None:
         """Initialize channels based on config."""
-        
+
         # Telegram channel
         if self.config.channels.telegram.enabled:
             try:
@@ -47,6 +54,7 @@ class ChannelManager:
                     self.bus,
                     groq_api_key=self.config.providers.groq.api_key,
                     session_manager=self.session_manager,
+                    cli_app=self.cli_app,  # Pass CLI app for dynamic commands
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:
