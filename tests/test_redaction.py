@@ -136,20 +136,48 @@ class TestRedactText:
         assert "sk-***" in result
         assert "sk-1234567890abcdefghijklmnopqrstuv" not in result
 
-        # Project keys (should be redacted)
-        text2 = "Key: sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890"
+        # Key in middle of string with text after
+        text2 = "Use key sk-1234567890abcdefghijklmnopqrstuv for production"
         result2 = redact_text(text2)
         assert "sk-***" in result2
+        assert "for production" in result2  # Text after key preserved
+        assert "sk-1234567890abcdefghijklmnopqrstuv" not in result2
 
-        # api_key=sk-xxx format (should be redacted)
-        text3 = "api_key=sk-1234567890abcdefghijklmnopqrstuv"
+        # Key followed by punctuation
+        text3 = "API key: sk-1234567890abcdefghijklmnopqrstuv."
         result3 = redact_text(text3)
-        assert "***" in result3
+        assert "sk-***" in result3
+        assert "sk-1234567890abcdefghijklmnopqrstuv" not in result3
+
+        # Multiple keys in one string
+        text4 = "Key1: sk-1234567890abcdefghijklmnopqrstuv and Key2: sk-9876543210zyxwvutsrqponmlkjihgfe"
+        result4 = redact_text(text4)
+        assert "sk-***" in result4
+        # Both keys should be redacted
+        assert "sk-1234567890abcdefghijklmnopqrstuv" not in result4
+        assert "sk-9876543210zyxwvutsrqponmlkjihgfe" not in result4
+
+        # Project keys (should be redacted)
+        text5 = "Key: sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz1234567890"
+        result5 = redact_text(text5)
+        assert "sk-***" in result5
+
+        # Key in URL parameter (caught by api_key_kv pattern)
+        text6 = "https://api.openai.com?key=sk-1234567890abcdefghijklmnopqrstuv&model=gpt-4"
+        result6 = redact_text(text6)
+        assert "***" in result6
+        assert "sk-1234567890abcdefghijklmnopqrstuv" not in result6
+
+        # Key in JSON format
+        text7 = '{"api_key": "sk-1234567890abcdefghijklmnopqrstuv", "model": "gpt-4"}'
+        result7 = redact_text(text7)
+        assert '"api_key": "sk-***"' in result7
+        assert "sk-1234567890abcdefghijklmnopqrstuv" not in result7
 
         # Too short (should NOT be redacted) - 27 chars
-        text4 = "My short key sk-short12345678901234567"
-        result4 = redact_text(text4)
-        assert "sk-short12345678901234567" in result4  # Not redacted
+        text8 = "My short key sk-short12345678901234567"
+        result8 = redact_text(text8)
+        assert "sk-short12345678901234567" in result8  # Not redacted
 
     def test_github_pat(self):
         """Test GitHub PAT redaction."""
@@ -158,11 +186,24 @@ class TestRedactText:
         assert "gh***" in result
         assert "xxxxxxxxxxxxxxxxxxxxxxxx" not in result
 
+        # GitHub PAT in middle of string
+        text2 = "Use token ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx for authentication"
+        result2 = redact_text(text2)
+        assert "gh***" in result2
+        assert "for authentication" in result2  # Text after token preserved
+        assert "xxxxxxxxxxxxxxxxxxxxxxxx" not in result2
+
     def test_slack_token(self):
         """Test Slack token redaction."""
         text = "xoxb-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
         result = redact_text(text)
         assert "xox***" in result
+
+        # Slack token in middle of sentence
+        text2 = "Install with xoxb-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx and configure"
+        result2 = redact_text(text2)
+        assert "xox***" in result2
+        assert "and configure" in result2  # Text after token preserved
 
     def test_bearer_token(self):
         """Test Bearer token redaction.
@@ -175,10 +216,23 @@ class TestRedactText:
         assert "Bearer ***" in result
         assert "eyJ" not in result
 
-        # Too short (should NOT be redacted)
-        text2 = "Bearer: shorttoken"
+        # Bearer token in middle of sentence
+        text2 = "Send request with Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 and check response"
         result2 = redact_text(text2)
-        assert "shorttoken" in result2  # Not redacted
+        assert "Bearer ***" in result2
+        assert "and check response" in result2  # Text after token preserved
+        assert "eyJ" not in result2
+
+        # Bearer token followed by comma
+        text3 = 'Headers: {"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"},'
+        result3 = redact_text(text3)
+        assert "Bearer ***" in result3
+        assert "eyJ" not in result3
+
+        # Too short (should NOT be redacted)
+        text4 = "Bearer: shorttoken"
+        result4 = redact_text(text4)
+        assert "shorttoken" in result4  # Not redacted
 
     def test_api_key_kv(self):
         """Test API key key-value redaction.
