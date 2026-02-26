@@ -19,9 +19,9 @@ def _resolve_path(
     if not p.is_absolute() and workspace:
         p = workspace / p
     resolved = p.resolve()
-    
-    # Block sensitive files
-    if block_sensitive and is_sensitive_path(str(resolved)):
+
+    # Block sensitive files (pass Path object directly)
+    if block_sensitive and is_sensitive_path(resolved):
         raise PermissionError(f"Access to sensitive path is blocked by redaction policy: {path}")
     
     if allowed_dir:
