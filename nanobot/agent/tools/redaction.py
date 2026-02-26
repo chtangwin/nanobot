@@ -4,24 +4,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-# Sensitive file path patterns (used to block file access)
-# NOTE: These regex patterns are deprecated. Use is_sensitive_path() with Path objects instead.
-SENSITIVE_PATH_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"(^|[\\/])\.env(\..+)?$", re.I),
-    re.compile(r"(^|[\\/])auth\.json$", re.I),
-    re.compile(r"(^|[\\/])oauth\.json$", re.I),
-    re.compile(r"(^|[\\/])id_rsa(\.pub)?$", re.I),
-    re.compile(r"(^|[\\/])id_ed25519(\.pub)?$", re.I),
-    re.compile(r"\.pem$", re.I),
-    re.compile(r"\.p12$", re.I),
-    re.compile(r"\.pfx$", re.I),
-    re.compile(r"\.jks$", re.I),
-    re.compile(r"\.key$", re.I),
-    re.compile(r"(^|[\\/])\.secrets$", re.I),
-    re.compile(r"(^|[\\/])secrets?\.", re.I),
-    re.compile(r"(^|[\\/])credentials?\.", re.I),
-]
-
 # Redaction rules for sensitive data
 # Order matters: more specific patterns should come first
 REDACTION_RULES: list[tuple[str, re.Pattern[str], str]] = [
