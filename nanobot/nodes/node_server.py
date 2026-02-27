@@ -38,7 +38,6 @@ except ImportError:
 # Configuration defaults
 DEFAULT_PORT = 8765
 DEFAULT_SESSION_NAME = "nanobot"
-DEFAULT_SOCKET_PATH = "/tmp/nanobot-tmux.sock"
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +45,10 @@ logger = logging.getLogger(__name__)
 class TmuxSession:
     """Manage a tmux session for maintaining context using a dedicated socket."""
 
-    def __init__(self, session_name: str = DEFAULT_SESSION_NAME, socket_path: str = DEFAULT_SOCKET_PATH):
+    def __init__(self, session_name: str = DEFAULT_SESSION_NAME, socket_path: str = None):
         self.session_name = session_name
+        # Socket will be in session directory (/tmp/nanobot-xxx/nanobot.sock)
+        # This is set by the caller before create()
         self.socket_path = socket_path
         self.running = False
 
@@ -80,6 +81,19 @@ class TmuxSession:
         )
         self.running = True
         logger.info(f"Created tmux session: {self.session_name} on socket {self.socket_path}")
+
+        # Save tmux socket info to file for cleanup later
+        try:
+            # Get the tmux server PID from socket file
+            socket_stat = os.stat(self.socket_path)
+            # The tmux server PID is stored as the socket's group ID
+            # Save to the session's temp directory
+            session_dir = os.path.dirname(self.socket_path)  # /tmp/nanobot-xxx
+            with open(f"{session_dir}/tmux.pid", 'w') as f:
+                f.write(str(socket_stat.st_gid))
+            logger.info(f"Saved tmux PID to {session_dir}/tmux.pid")
+        except Exception as e:
+            logger.warning(f"Could not save tmux info: {e}")
 
     async def send(self, command: str) -> None:
         """Send command to tmux session."""
@@ -188,10 +202,11 @@ class SimpleExecutor:
 class CommandExecutor:
     """Execute commands and return results."""
 
-    def __init__(self, use_tmux: bool = True):
+    def __init__(self, use_tmux: bool = True, socket_path: str = None):
         self.use_tmux = use_tmux
+        self.socket_path = socket_path or "/tmp/nanobot-tmux.sock"
         if use_tmux:
-            self.tmux = TmuxSession()
+            self.tmux = TmuxSession(socket_path=self.socket_path)
         else:
             self.tmux = None
 
@@ -281,7 +296,7 @@ class CommandExecutor:
             self.tmux.kill()
 
 
-async def handle_connection(websocket, auth_token: str, use_tmux: bool):
+async def handle_connection(websocket, auth_token: str, use_tmux: bool, session_dir: str = None):
     """Handle WebSocket connection."""
     logger.info(f"New connection from {websocket.remote_address}")
 
@@ -309,7 +324,11 @@ async def handle_connection(websocket, auth_token: str, use_tmux: bool):
         logger.error(f"Authentication error: {e}")
         return
 
-    executor = CommandExecutor(use_tmux=use_tmux)
+    # Use socket in session directory
+    socket_path = f"{session_dir}/tmux.sock" if session_dir else "/tmp/nanobot-tmux.sock"
+    logger.info(f"Using tmux socket: {socket_path}")
+    
+    executor = CommandExecutor(use_tmux=use_tmux, socket_path=socket_path)
 
     try:
         async for message in websocket:
@@ -448,7 +467,9 @@ async def main():
         loop.add_signal_handler(sig, signal_handler)
 
     # Start server
-    handler = lambda ws: handle_connection(ws, token, use_tmux)
+    # Determine session directory from config file path
+    session_dir = os.path.dirname(args.config) if args.config else None
+    handler = lambda ws: handle_connection(ws, token, use_tmux, session_dir)
 
     async with websockets.serve(handler, "0.0.0.0", port):
         logger.info(f"Server listening on ws://0.0.0.0:{port}")
