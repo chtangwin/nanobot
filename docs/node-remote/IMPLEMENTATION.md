@@ -27,7 +27,7 @@
 │  远程服务器                                                  │
 │                                                             │
 │  /tmp/nanobot-xxx/                                          │
-│  └── nanobot-node.py   - WebSocket 服务器 + tmux 包装器     │
+│  └── node_server.py   - WebSocket 服务器 + tmux 包装器     │
 │                                                             │
 │  tmux 会话 "nanobot"  - 保持命令上下文                      │
 └─────────────────────────────────────────────────────────────┘
@@ -95,7 +95,7 @@ setup()
   │   ├─ mkdir /tmp/nanobot-xxx/
   │   └─ base64 编码脚本
   ├─ _start_node()
-  │   └─ uv run nanobot-node.py
+  │   └─ uv run node_server.py
   ├─ _connect_websocket()
   │   └─ websockets.connect(ws://localhost:port)
   └─ _authenticate()
@@ -183,7 +183,7 @@ _write_remote(path, content, node)
   └─ 返回结果
 ```
 
-### scripts/nanobot-node.py
+### scripts/node_server.py
 
 **用途**：部署到远程服务器
 
@@ -216,10 +216,10 @@ _write_remote(path, content, node)
 **用法**：
 ```bash
 # 在远程服务器上
-uv run --with websockets nanobot-node.py --port 8765 --token secret
+uv run --with websockets node_server.py --port 8765 --token secret
 
 # 不使用 tmux（无会话保持）
-uv run --with websockets nanobot-node.py --no-tmux
+uv run --with websockets node_server.py --no-tmux
 ```
 
 ## 与现有工具的集成

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""nanobot-node: Remote execution node for nanobot.
+"""nanobot node_server: Remote execution server for nanobot.
 
 This script runs on remote servers and provides command execution
 capabilities through WebSocket communication.
 
 Usage:
-    uv run --with websockets nanobot-node.py [options]
+    uv run --with websockets node_server.py [options]
 
 Options:
     --port PORT           WebSocket port to listen on (default: 8765)
@@ -26,7 +26,7 @@ try:
 except ImportError:
     print("Error: websockets package not found.")
     print("Install with: pip install websockets")
-    print("Or run with: uv run --with websockets nanobot-node.py")
+    print("Or run with: uv run --with websockets node_server.py")
     sys.exit(1)
 
 # Configuration defaults
@@ -287,7 +287,7 @@ async def main():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
-    logger.info(f"Starting nanobot-node on port {args.port}")
+    logger.info(f"Starting node_server on port {args.port}")
     if args.token:
         logger.info("Authentication token enabled")
     if args.no_tmux:
@@ -313,7 +313,7 @@ async def main():
         logger.info(f"Server listening on ws://0.0.0.0:{args.port}")
         await stop_event.wait()
 
-    logger.info("nanobot-node stopped")
+    logger.info("node_server stopped")
 
 
 if __name__ == "__main__":

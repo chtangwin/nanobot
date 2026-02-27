@@ -21,23 +21,11 @@ logger = logging.getLogger(__name__)
 
 
 def _get_node_script_path() -> Path:
-    """Get the path to the nanobot-node.py script."""
-    # Try multiple possible locations
-    possible_paths = [
-        # Development directory (relative to project root)
-        Path(__file__).parent.parent.parent.parent / "scripts" / "nanobot-node.py",
-        # Inside nanobot package (for installed packages)
-        Path(__file__).parent.parent / "scripts" / "nanobot-node.py",
-        # Current working directory / scripts
-        Path.cwd() / "scripts" / "nanobot-node.py",
-    ]
+    """Get the path to the node_server.py script.
 
-    for path in possible_paths:
-        if path.exists():
-            return path
-
-    # Default fallback (may not exist)
-    return possible_paths[0]
+    The script is located in the same directory as this module.
+    """
+    return Path(__file__).parent / "node_server.py"
 
 
 # Load the node script at module import
@@ -45,7 +33,7 @@ _NODE_SCRIPT_PATH = _get_node_script_path()
 if _NODE_SCRIPT_PATH.exists():
     _NODE_SCRIPT = _NODE_SCRIPT_PATH.read_text()
 else:
-    logger.warning(f"nanobot-node.py not found at {_NODE_SCRIPT_PATH}")
+    logger.warning(f"node_server.py not found at {_NODE_SCRIPT_PATH}")
     _NODE_SCRIPT = ""
 
 class RemoteNode:
@@ -254,7 +242,7 @@ class RemoteNode:
     async def _deploy_node(self):
         """Deploy node script to remote server."""
         if not _NODE_SCRIPT:
-            raise RuntimeError("nanobot-node.py script not found. Cannot deploy node.")
+            raise RuntimeError("node_server.py script not found. Cannot deploy node.")
 
         # Create remote temporary directory
         remote_dir = f"/tmp/{self.session_id}"
@@ -263,7 +251,7 @@ class RemoteNode:
         # Upload script (base64 encoded to avoid shell escaping issues)
         encoded_script = base64.b64encode(_NODE_SCRIPT.encode()).decode()
         await self._ssh_exec(
-            f"echo {encoded_script} | base64 -d > {remote_dir}/nanobot-node.py"
+            f"echo {encoded_script} | base64 -d > {remote_dir}/node_server.py"
         )
 
     async def _start_node(self):
@@ -274,7 +262,7 @@ class RemoteNode:
         args = [
             f"cd {remote_dir}",
             "nohup",
-            "uv", "run", "--with", "websockets", "nanobot-node.py",
+            "uv", "run", "--with", "websockets", "node_server.py",
             f"--port", str(self.config.remote_port),
         ]
         if self.config.auth_token:
@@ -292,7 +280,7 @@ class RemoteNode:
         if self.session_id:
             # Kill the node process
             await self._ssh_exec(
-                f"pkill -f 'nanobot-node.py' || true"
+                f"pkill -f 'node_server.py' || true"
             )
 
             # Clean up temporary directory

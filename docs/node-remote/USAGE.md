@@ -191,8 +191,8 @@ nodes action="add" name="server" ssh_host="user@host" workspace="/app"
 ```
 1. 用户："连接到 build-server"
 2. 网关：SSH → build-server
-3. 网关：部署 nanobot-node.py 到 /tmp/nanobot-xxx/
-4. 网关：启动 uv run nanobot-node.py（WebSocket 服务器）
+3. 网关：部署 node_server.py 到 /tmp/nanobot-xxx/
+4. 网关：启动 uv run node_server.py（WebSocket 服务器）
 5. 网关：创建 SSH 隧道（localhost:XXXX → remote:8765）
 6. 网关：通过隧道连接 WebSocket
 7. 网关：在远程创建 tmux 会话
