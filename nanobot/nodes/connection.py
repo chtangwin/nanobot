@@ -416,9 +416,7 @@ class RemoteNode:
             await asyncio.sleep(0.5)
 
             # Clean up - use remote_dir variable
-            logger.info(f"Cleaning up {remote_dir}...")
-            result = await self._ssh_exec(f"rm -rf {remote_dir}")
-            logger.info(f"Cleanup result: {result}")
+            await self._ssh_exec(f"rm -rf {remote_dir}")
 
     async def _connect_websocket(self):
         """Connect to remote node via WebSocket."""
