@@ -20,6 +20,7 @@ Options:
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import signal
@@ -37,61 +38,120 @@ except ImportError:
 # Configuration defaults
 DEFAULT_PORT = 8765
 DEFAULT_SESSION_NAME = "nanobot"
+DEFAULT_SOCKET_PATH = "/tmp/nanobot-tmux.sock"
 
 logger = logging.getLogger(__name__)
 
 
 class TmuxSession:
-    """Manage a tmux session for maintaining context."""
+    """Manage a tmux session for maintaining context using a dedicated socket."""
 
-    def __init__(self, session_name: str = DEFAULT_SESSION_NAME):
+    def __init__(self, session_name: str = DEFAULT_SESSION_NAME, socket_path: str = DEFAULT_SOCKET_PATH):
         self.session_name = session_name
+        self.socket_path = socket_path
         self.running = False
 
+    def _tmux_cmd(self, *args) -> list:
+        """Build tmux command with socket."""
+        return ["tmux", "-S", self.socket_path] + list(args)
+
     async def create(self):
-        """Create a new tmux session."""
+        """Create a new tmux session with dedicated socket."""
         if self.running:
             return
 
+        # Ensure socket directory exists
+        socket_dir = os.path.dirname(self.socket_path)
+        os.makedirs(socket_dir, exist_ok=True)
+
         # Check if session already exists
         result = subprocess.run(
-            ["tmux", "has-session", "-t", self.session_name],
+            self._tmux_cmd("has-session", "-t", self.session_name),
             capture_output=True,
         )
         if result.returncode == 0:
             # Session exists, kill it
             self.kill()
 
-        # Create new session
+        # Create new session with socket
         subprocess.run(
-            ["tmux", "new-session", "-d", "-s", self.session_name],
+            self._tmux_cmd("new-session", "-d", "-s", self.session_name, "-n", "shell"),
             check=True,
         )
         self.running = True
-        logger.info(f"Created tmux session: {self.session_name}")
+        logger.info(f"Created tmux session: {self.session_name} on socket {self.socket_path}")
 
     async def send(self, command: str) -> None:
         """Send command to tmux session."""
         # Escape single quotes in command
         escaped = command.replace("'", "'\\''")
-        cmd = f"tmux send-keys -t {self.session_name} '{escaped}' Enter"
-        subprocess.run(cmd, shell=True, check=True)
+        # Use send-keys with literal string
+        subprocess.run(
+            self._tmux_cmd("send-keys", "-t", self.session_name, "-l", "--", escaped),
+            check=True,
+        )
+        # Send Enter
+        subprocess.run(
+            self._tmux_cmd("send-keys", "-t", self.session_name, "Enter"),
+            check=True,
+        )
         logger.debug(f"Sent command to tmux: {command[:50]}...")
 
     async def capture(self) -> str:
-        """Capture output from tmux session."""
+        """Capture output from tmux session using proper tmux socket and history."""
+        # Use -J to include wrapped lines, -S -50 to get last 50 lines of history
         result = subprocess.run(
-            ["tmux", "capture-pane", "-t", self.session_name, "-p"],
+            ["tmux", "-S", self.socket_path, "capture-pane", "-p", "-J", "-t", self.session_name, "-S", "-50"],
             capture_output=True,
             text=True,
             check=True,
         )
-        return result.stdout
+
+        raw_output = result.stdout
+        lines = raw_output.split('\n')
+
+        # Strategy: Find ALL prompt lines, then get content between the last two prompts
+        # This captures the actual command output
+        
+        prompt_indices = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            # Detect prompt lines (contain $ or #)
+            if '$' in stripped or '#' in stripped:
+                prompt_indices.append(i)
+        
+        output = ""
+        
+        if len(prompt_indices) >= 2:
+            # Get content between the last two prompts
+            last_prompt = prompt_indices[-1]
+            second_last_prompt = prompt_indices[-2]
+            
+            # Get lines between prompts
+            output_lines = lines[second_last_prompt + 1:last_prompt]
+            output = '\n'.join(line.strip() for line in output_lines if line.strip())
+        elif len(prompt_indices) == 1:
+            # Only one prompt - get everything after it
+            last_prompt = prompt_indices[0]
+            output_lines = lines[last_prompt + 1:]
+            output = '\n'.join(line.strip() for line in output_lines if line.strip())
+        
+        # Fallback: if still empty, try last few non-prompt lines
+        if not output:
+            filtered = []
+            for line in lines:
+                stripped = line.strip()
+                if stripped and '$' not in stripped and '#' not in stripped:
+                    filtered.append(stripped)
+            if filtered:
+                output = '\n'.join(filtered[-3:])  # Last 3 non-prompt lines
+
+        return output.strip()
 
     def kill(self):
         """Kill the tmux session."""
         subprocess.run(
-            ["tmux", "kill-session", "-t", self.session_name],
+            self._tmux_cmd("kill-session", "-t", self.session_name),
             capture_output=True,
         )
         self.running = False
@@ -143,23 +203,64 @@ class CommandExecutor:
             return await self._execute_simple(command)
 
     async def _execute_tmux(self, command: str) -> dict:
-        """Execute command using tmux session."""
+        """Execute command using tmux session with output capture."""
         try:
             # Ensure tmux session exists
             await self.tmux.create()
 
+            # Debug: check session exists
+            logger.debug(f"TMUX: Session {self.tmux.session_name} created, checking...")
+
             # Send command
             await self.tmux.send(command)
+            logger.debug(f"TMUX: Sent command: {command}")
 
             # Wait for command to execute
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.8)
 
-            # Capture output
-            output = await self.tmux.capture()
+            # Capture output using tmux capture-pane with socket
+            result = subprocess.run(
+                ["tmux", "-S", self.tmux.socket_path, "capture-pane", "-p", "-J", "-t", self.tmux.session_name, "-S", "-50"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            raw_output = result.stdout
+            lines = raw_output.split('\n')
+
+            # Find ALL prompt lines, then get content between the last two prompts
+            prompt_indices = []
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if '$' in stripped or '#' in stripped:
+                    prompt_indices.append(i)
+            
+            output = ""
+            
+            if len(prompt_indices) >= 2:
+                last_prompt = prompt_indices[-1]
+                second_last_prompt = prompt_indices[-2]
+                output_lines = lines[second_last_prompt + 1:last_prompt]
+                output = '\n'.join(line.strip() for line in output_lines if line.strip())
+            elif len(prompt_indices) == 1:
+                last_prompt = prompt_indices[0]
+                output_lines = lines[last_prompt + 1:]
+                output = '\n'.join(line.strip() for line in output_lines if line.strip())
+            
+            # Fallback
+            if not output:
+                filtered = []
+                for line in lines:
+                    stripped = line.strip()
+                    if stripped and '$' not in stripped and '#' not in stripped:
+                        filtered.append(stripped)
+                if filtered:
+                    output = '\n'.join(filtered[-3:])
 
             return {
                 "success": True,
-                "output": output,
+                "output": output.strip(),
                 "error": None,
             }
         except Exception as e:

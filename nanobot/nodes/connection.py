@@ -341,18 +341,24 @@ class RemoteNode:
         log_file = f"{remote_dir}/node_server.log"
         config_file = f"{remote_dir}/config.json"
 
-        # Build command using config file (more robust than string replacement)
+        # Kill any existing node_server.py processes on this port before starting
+        logger.info(f"Cleaning up any existing node_server processes on port {self.config.remote_port}")
+        await self._ssh_exec(
+            f"pkill -f 'node_server.py.*--config.*{config_file}' || true"
+        )
+        await asyncio.sleep(0.5)
+
+        # Build command using config file
         cmd = f"cd {remote_dir} && nohup uv run --with websockets node_server.py --config {config_file} > {log_file} 2>&1 &"
 
         logger.info(f"Starting node on remote with config file")
-        logger.info(f"Command: {cmd}")
         logger.info(f"Remote log: {log_file}")
         logger.info(f"Remote config: {config_file}")
 
         await self._ssh_exec(cmd)
 
         # Wait for node to start
-        logger.info(f"Waiting {3}s for node to start...")
+        logger.info(f"Waiting 3s for node to start...")
         await asyncio.sleep(3)
 
     async def _get_remote_log(self, tail_lines: int = 50) -> str:
@@ -371,9 +377,18 @@ class RemoteNode:
     async def _stop_node(self):
         """Stop the node process on remote server."""
         if self.session_id:
-            # Kill the node process
+            remote_dir = f"/tmp/{self.session_id}"
+            config_file = f"{remote_dir}/config.json"
+
+            # Kill only this session's node process (using config file path)
+            logger.info(f"Stopping node process for session {self.session_id}")
             await self._ssh_exec(
-                f"pkill -f 'node_server.py' || true"
+                f"pkill -f 'node_server.py.*--config.*{config_file}' || true"
+            )
+
+            # Kill tmux session for this node
+            await self._ssh_exec(
+                f"tmux kill-session -t nanobot 2>/dev/null || true"
             )
 
             # Clean up temporary directory
