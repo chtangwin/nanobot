@@ -427,7 +427,7 @@ class RemoteNode:
 
         try:
             self.websocket = await asyncio.wait_for(
-                websockets.connect(ws_url),
+                websockets.connect(ws_url, max_size=50 * 1024 * 1024),  # 50MB
                 timeout=10.0
             )
         except asyncio.TimeoutError:
