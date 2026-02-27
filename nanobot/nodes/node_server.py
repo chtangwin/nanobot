@@ -308,7 +308,7 @@ async def main():
             # Apply config (overrides command line args)
             port = config.get("port", args.port)
             token = config.get("token", args.token)
-            use_tmux = not config.get("no_tmux", args.no_tmux)
+            use_tmux = config.get("tmux", not args.no_tmux)
 
             logger.info(f"Loaded config from: {args.config}")
             logger.info(f"Config: port={port}, token={'***' if token else 'none'}, tmux={use_tmux}")

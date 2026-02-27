@@ -271,6 +271,7 @@ class RemoteNode:
         # Create config file
         config = {
             "port": self.config.remote_port,
+            "tmux": True,  # Enable tmux for session persistence
         }
         if self.config.auth_token:
             config["token"] = self.config.auth_token
@@ -280,7 +281,7 @@ class RemoteNode:
         encoded_config = base64.b64encode(config_json.encode()).decode()
 
         logger.info(f"Uploading config.json to {remote_dir}")
-        logger.info(f"Config: port={config['port']}, token={'***' if config.get('token') else 'none'}")
+        logger.info(f"Config: port={config['port']}, tmux={config['tmux']}, token={'***' if config.get('token') else 'none'}")
         await self._ssh_exec(
             f"echo {encoded_config} | base64 -d > {remote_dir}/config.json"
         )
