@@ -341,15 +341,24 @@ class RemoteNode:
         log_file = f"{remote_dir}/node_server.log"
         config_file = f"{remote_dir}/config.json"
 
-        # Kill any existing node_server.py processes on this port before starting
-        logger.info(f"Cleaning up any existing node_server processes on port {self.config.remote_port}")
+        # Kill any existing node_server.py processes using this port
+        logger.info(f"Cleaning up existing node_server processes on port {self.config.remote_port}")
+        
+        # Kill processes using the port first
         await self._ssh_exec(
-            f"pkill -f 'node_server.py.*--config.*{config_file}' || true"
+            f"fuser -k {self.config.remote_port}/tcp 2>/dev/null || true"
         )
-        await asyncio.sleep(0.5)
+        
+        # Also kill any node_server.py processes
+        await self._ssh_exec(
+            f"pkill -f 'node_server.py' || true"
+        )
+        
+        await asyncio.sleep(1)
 
         # Build command using config file
-        cmd = f"cd {remote_dir} && nohup uv run --with websockets node_server.py --config {config_file} > {log_file} 2>&1 &"
+        # Use setsid to fully detach from terminal
+        cmd = f"cd {remote_dir} && setsid uv run --with websockets node_server.py --config {config_file} > {log_file} 2>&1 &"
 
         logger.info(f"Starting node on remote with config file")
         logger.info(f"Remote log: {log_file}")
@@ -380,16 +389,31 @@ class RemoteNode:
             remote_dir = f"/tmp/{self.session_id}"
             config_file = f"{remote_dir}/config.json"
 
-            # Kill only this session's node process (using config file path)
+            # Kill the node process using config file path
             logger.info(f"Stopping node process for session {self.session_id}")
+            
+            # Try multiple methods to ensure process is killed
             await self._ssh_exec(
                 f"pkill -f 'node_server.py.*--config.*{config_file}' || true"
+            )
+            await asyncio.sleep(0.5)
+            
+            # Force kill if still running
+            await self._ssh_exec(
+                f"pkill -9 -f 'node_server.py.*--config.*{config_file}' || true"
+            )
+            
+            # Also kill by port
+            await self._ssh_exec(
+                f"fuser -k {self.config.remote_port}/tcp 2>/dev/null || true"
             )
 
             # Kill tmux session for this node
             await self._ssh_exec(
-                f"tmux kill-session -t nanobot 2>/dev/null || true"
+                f"tmux -S /tmp/nanobot-tmux.sock kill-session -t nanobot 2>/dev/null || true"
             )
+
+            await asyncio.sleep(0.5)
 
             # Clean up temporary directory
             await self._ssh_exec(
