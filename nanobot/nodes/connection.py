@@ -251,33 +251,40 @@ class RemoteNode:
 
         # Create remote temporary directory
         remote_dir = f"/tmp/{self.session_id}"
+        logger.info(f"Creating remote directory: {remote_dir}")
         await self._ssh_exec(f"mkdir -p {remote_dir}")
 
         # Upload script (base64 encoded to avoid shell escaping issues)
+        logger.info(f"Uploading node_server.py to {remote_dir}")
         encoded_script = base64.b64encode(_NODE_SCRIPT.encode()).decode()
         await self._ssh_exec(
             f"echo {encoded_script} | base64 -d > {remote_dir}/node_server.py"
         )
+        logger.info(f"Script uploaded successfully")
 
     async def _start_node(self):
         """Start the node process on remote server."""
         remote_dir = f"/tmp/{self.session_id}"
 
         # Build command with configuration
-        args = [
+        # Use && to chain commands properly
+        cmd_parts = [
             f"cd {remote_dir}",
             "nohup",
             "uv", "run", "--with", "websockets", "node_server.py",
             f"--port", str(self.config.remote_port),
         ]
         if self.config.auth_token:
-            args.extend(["--token", f'"{self.config.auth_token}"'])
+            cmd_parts.extend(["--token", self.config.auth_token])
 
-        # Start node process
-        cmd = " ".join(args) + " > /dev/null 2>&1 &"
+        # Chain commands with && and redirect output
+        cmd = " && ".join(cmd_parts) + " > /dev/null 2>&1 &"
+        logger.info(f"Starting node on remote: {cmd}")
+
         await self._ssh_exec(cmd)
 
         # Wait for node to start
+        logger.info(f"Waiting {3}s for node to start...")
         await asyncio.sleep(3)
 
     async def _stop_node(self):
