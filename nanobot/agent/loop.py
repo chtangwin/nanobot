@@ -17,12 +17,15 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.nodes import NodesTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.nodes.config import NodesConfig
+from nanobot.nodes.manager import NodeManager
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
@@ -89,6 +92,11 @@ class AgentLoop:
         )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+        
+        # Initialize NodeManager for remote node support
+        nodes_config = NodesConfig.load(NodesConfig.get_default_config_path())
+        self.node_manager = NodeManager(nodes_config)
+        
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -117,22 +125,46 @@ class AgentLoop:
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         allowed_dir = self.workspace if self.restrict_to_workspace else None
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(
-                workspace=self.workspace,
-                allowed_dir=allowed_dir,
-                block_sensitive_files=self.block_sensitive_files,
-            ))
+
+        # Filesystem tools - only those that support node_manager
+        self.tools.register(ReadFileTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            block_sensitive_files=self.block_sensitive_files,
+            node_manager=self.node_manager,
+        ))
+        self.tools.register(WriteFileTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            block_sensitive_files=self.block_sensitive_files,
+            node_manager=self.node_manager,
+        ))
+        self.tools.register(EditFileTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            block_sensitive_files=self.block_sensitive_files,
+        ))
+        self.tools.register(ListDirTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            block_sensitive_files=self.block_sensitive_files,
+        ))
+
+        # Shell execution tool
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
+            node_manager=self.node_manager,
         ))
+
+        # Other tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
+        self.tools.register(NodesTool())
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
