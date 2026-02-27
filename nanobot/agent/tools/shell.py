@@ -4,14 +4,17 @@ import asyncio
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from nanobot.agent.tools.base import Tool
+
+if TYPE_CHECKING:
+    from nanobot.nodes.manager import NodeManager
 
 
 class ExecTool(Tool):
     """Tool to execute shell commands."""
-    
+
     def __init__(
         self,
         timeout: int = 60,
@@ -20,6 +23,7 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        node_manager: "NodeManager | None" = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -37,6 +41,7 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self._node_manager = node_manager
     
     @property
     def name(self) -> str:
@@ -44,11 +49,11 @@ class ExecTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Execute a shell command and return its output. Use with caution."
-    
+        return "Execute a shell command and return its output. Use with caution. Can execute on remote nodes by specifying the 'node' parameter."
+
     @property
     def parameters(self) -> dict[str, Any]:
-        return {
+        props = {
             "type": "object",
             "properties": {
                 "command": {
@@ -62,8 +67,25 @@ class ExecTool(Tool):
             },
             "required": ["command"]
         }
+
+        # Add node parameter if node_manager is available
+        if self._node_manager is not None:
+            props["properties"]["node"] = {
+                "type": "string",
+                "description": "Optional remote node name to execute on. If not specified, executes locally."
+            }
+
+        return props
     
-    async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
+    async def execute(self, command: str, working_dir: str | None = None, node: str | None = None, **kwargs: Any) -> str:
+        # Handle remote node execution
+        if node and self._node_manager:
+            return await self._execute_remote(command, node, working_dir)
+
+        # Local execution
+        return await self._execute_local(command, working_dir)
+
+    async def _execute_local(self, command: str, working_dir: str | None = None) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:
@@ -156,3 +178,49 @@ class ExecTool(Tool):
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None
+
+    async def _execute_remote(
+        self,
+        command: str,
+        node: str,
+        working_dir: str | None = None,
+    ) -> str:
+        """
+        Execute command on a remote node.
+
+        Args:
+            command: Command to execute.
+            node: Node name.
+            working_dir: Optional working directory.
+
+        Returns:
+            Command output.
+        """
+        if not self._node_manager:
+            return "Error: Node manager not available"
+
+        try:
+            # Change directory if working_dir is specified
+            if working_dir:
+                full_command = f"cd {working_dir} && {command}"
+            else:
+                full_command = command
+
+            result = await self._node_manager.execute(
+                full_command,
+                node=node,
+                timeout=self.timeout,
+            )
+
+            if result["success"]:
+                output = result["output"] or "(no output)"
+                if result.get("error"):
+                    output += f"\nSTDERR:\n{result['error']}"
+                return output
+            else:
+                return f"Error: {result['error'] or 'Command failed'}"
+
+        except KeyError:
+            return f"Error: Node '{node}' not found. Use 'nodes action=\"add\"' to add it first"
+        except Exception as e:
+            return f"Error executing command on remote node: {str(e)}"

@@ -2,10 +2,13 @@
 
 import difflib
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.redaction import is_sensitive_path
+
+if TYPE_CHECKING:
+    from nanobot.nodes.manager import NodeManager
 
 
 def _resolve_path(
@@ -40,22 +43,24 @@ class ReadFileTool(Tool):
         workspace: Path | None = None,
         allowed_dir: Path | None = None,
         block_sensitive_files: bool = True,
+        node_manager: "NodeManager | None" = None,
     ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
         self._block_sensitive = block_sensitive_files
+        self._node_manager = node_manager
 
     @property
     def name(self) -> str:
         return "read_file"
-    
+
     @property
     def description(self) -> str:
-        return "Read the contents of a file at the given path."
-    
+        return "Read the contents of a file at the given path. Can read from remote nodes by specifying the 'node' parameter."
+
     @property
     def parameters(self) -> dict[str, Any]:
-        return {
+        props = {
             "type": "object",
             "properties": {
                 "path": {
@@ -65,8 +70,22 @@ class ReadFileTool(Tool):
             },
             "required": ["path"]
         }
-    
-    async def execute(self, path: str, **kwargs: Any) -> str:
+
+        if self._node_manager is not None:
+            props["properties"]["node"] = {
+                "type": "string",
+                "description": "Optional remote node name to read from. If not specified, reads locally."
+            }
+
+        return props
+
+    async def execute(self, path: str, node: str | None = None, **kwargs: Any) str:
+        # Handle remote node read
+        if node and self._node_manager:
+            return await self._read_remote(path, node)
+
+        # Local read
+        return await self._read_local(path)
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
             if not file_path.exists():
@@ -81,6 +100,44 @@ class ReadFileTool(Tool):
         except Exception as e:
             return f"Error reading file: {str(e)}"
 
+    async def _read_local(self, path: str) -> str:
+        """Read file locally."""
+        try:
+            file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
+            if not file_path.exists():
+                return f"Error: File not found: {path}"
+            if not file_path.is_file():
+                return f"Error: Not a file: {path}"
+
+            content = file_path.read_text(encoding="utf-8")
+            return content
+        except PermissionError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error reading file: {str(e)}"
+
+    async def _read_remote(self, path: str, node: str) -> str:
+        """Read file from remote node."""
+        if not self._node_manager:
+            return "Error: Node manager not available"
+
+        try:
+            result = await self._node_manager.execute(
+                f"cat {path}",
+                node=node,
+                timeout=30.0,
+            )
+
+            if result["success"]:
+                return result["output"] or ""
+            else:
+                return f"Error: {result['error'] or 'Failed to read file'}"
+
+        except KeyError:
+            return f"Error: Node '{node}' not found"
+        except Exception as e:
+            return f"Error reading file from remote node: {str(e)}"
+
 
 class WriteFileTool(Tool):
     """Tool to write content to a file."""
@@ -90,22 +147,24 @@ class WriteFileTool(Tool):
         workspace: Path | None = None,
         allowed_dir: Path | None = None,
         block_sensitive_files: bool = True,
+        node_manager: "NodeManager | None" = None,
     ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
         self._block_sensitive = block_sensitive_files
+        self._node_manager = node_manager
 
     @property
     def name(self) -> str:
         return "write_file"
-    
+
     @property
     def description(self) -> str:
-        return "Write content to a file at the given path. Creates parent directories if needed."
-    
+        return "Write content to a file at the given path. Creates parent directories if needed. Can write to remote nodes by specifying the 'node' parameter."
+
     @property
     def parameters(self) -> dict[str, Any]:
-        return {
+        props = {
             "type": "object",
             "properties": {
                 "path": {
@@ -119,8 +178,22 @@ class WriteFileTool(Tool):
             },
             "required": ["path", "content"]
         }
-    
-    async def execute(self, path: str, content: str, **kwargs: Any) -> str:
+
+        if self._node_manager is not None:
+            props["properties"]["node"] = {
+                "type": "string",
+                "description": "Optional remote node name to write to. If not specified, writes locally."
+            }
+
+        return props
+
+    async def execute(self, path: str, content: str, node: str | None = None, **kwargs: Any) -> str:
+        # Handle remote node write
+        if node and self._node_manager:
+            return await self._write_remote(path, content, node)
+
+        # Local write
+        return await self._write_local(path, content)
         try:
             file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,6 +203,45 @@ class WriteFileTool(Tool):
             return f"Error: {e}"
         except Exception as e:
             return f"Error writing file: {str(e)}"
+
+    async def _write_local(self, path: str, content: str) -> str:
+        """Write file locally."""
+        try:
+            file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8")
+            return f"Successfully wrote {len(content)} bytes to {file_path}"
+        except PermissionError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error writing file: {str(e)}"
+
+    async def _write_remote(self, path: str, content: str, node: str) -> str:
+        """Write file to remote node."""
+        if not self._node_manager:
+            return "Error: Node manager not available"
+
+        try:
+            import base64
+
+            # Encode content to base64 to avoid shell escaping issues
+            encoded = base64.b64encode(content.encode()).decode()
+
+            result = await self._node_manager.execute(
+                f"mkdir -p $(dirname {path}) && echo {encoded} | base64 -d > {path}",
+                node=node,
+                timeout=30.0,
+            )
+
+            if result["success"]:
+                return f"Successfully wrote {len(content)} bytes to {path} on node '{node}'"
+            else:
+                return f"Error: {result['error'] or 'Failed to write file'}"
+
+        except KeyError:
+            return f"Error: Node '{node}' not found"
+        except Exception as e:
+            return f"Error writing file to remote node: {str(e)}"
 
 
 class EditFileTool(Tool):
