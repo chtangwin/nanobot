@@ -1,160 +1,160 @@
-# Remote Node Implementation Notes
+# 远程节点实现说明
 
-> Technical details of the remote node implementation
+> 远程节点实现的技术细节
 
-## Architecture Overview
+## 架构概览
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Gateway (Local)                                            │
+│  网关（本地）                                                │
 │                                                             │
 │  nanobot/                                                   │
 │  ├── nodes/                                                 │
-│  │   ├── config.py      - Node configuration management    │
+│  │   ├── config.py      - 节点配置管理                      │
 │  │   ├── connection.py  - RemoteNode (SSH + WebSocket)     │
-│  │   └── manager.py     - NodeManager (multi-node)         │
+│  │   └── manager.py     - NodeManager (多节点)              │
 │  ├── agent/tools/                                           │
-│  │   ├── nodes.py       - NodesTool (user interface)       │
-│  │   ├── shell.py       - exec with node parameter         │
-│  │   └── filesystem.py  - read/write with node parameter   │
+│  │   ├── nodes.py       - NodesTool (用户界面)              │
+│  │   ├── shell.py       - exec 支持节点参数                 │
+│  │   └── filesystem.py  - read/write 支持节点参数           │
 │  └── config/                                                │
-│      └── nodes.json     - Stored node configurations       │
+│      └── nodes.json     - 存储的节点配置                    │
 └─────────────────────────────────────────────────────────────┘
                          │
-                SSH Tunnel (-L)
+                SSH 隧道 (-L)
                          │
 ┌─────────────────────────────────────────────────────────────┐
-│  Remote Server                                              │
+│  远程服务器                                                  │
 │                                                             │
 │  /tmp/nanobot-xxx/                                          │
-│  └── nanobot-node.py   - WebSocket server + tmux wrapper   │
+│  └── nanobot-node.py   - WebSocket 服务器 + tmux 包装器     │
 │                                                             │
-│  tmux session "nanobot"  - Maintains command context        │
+│  tmux 会话 "nanobot"  - 保持命令上下文                      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Module Details
+## 模块详情
 
 ### nanobot/nodes/config.py
 
-**Purpose**: Configuration data structures
+**用途**：配置数据结构
 
-**Classes**:
-- `NodeConfig`: Single node configuration
-  - `name`: Node identifier
-  - `ssh_host`: SSH connection string (user@host)
-  - `ssh_port`: SSH port (default: 22)
-  - `ssh_key_path`: Optional SSH key path
-  - `remote_port`: WebSocket port on remote (default: 8765)
-  - `local_port`: Local SSH tunnel port (auto-assigned)
-  - `auth_token`: Optional authentication token
-  - `workspace`: Default working directory
+**类**：
+- `NodeConfig`：单个节点配置
+  - `name`：节点标识符
+  - `ssh_host`：SSH 连接字符串 (user@host)
+  - `ssh_port`：SSH 端口（默认：22）
+  - `ssh_key_path`：可选的 SSH 密钥路径
+  - `remote_port`：远程 WebSocket 端口（默认：8765）
+  - `local_port`：本地 SSH 隧道端口（自动分配）
+  - `auth_token`：可选的认证令牌
+  - `workspace`：默认工作目录
 
-- `NodesConfig`: Collection of nodes
-  - `add_node()`: Add node configuration
-  - `remove_node()`: Remove node
-  - `get_node()`: Get node by name
-  - `save()`: Save to file
-  - `load()`: Load from file
+- `NodesConfig`：节点集合
+  - `add_node()`：添加节点配置
+  - `remove_node()`：移除节点
+  - `get_node()`：按名称获取节点
+  - `save()`：保存到文件
+  - `load()`：从文件加载
 
-**Storage**: `~/.nanobot/nodes.json`
+**存储位置**：`~/.nanobot/nodes.json`
 
 ### nanobot/nodes/connection.py
 
-**Purpose**: Remote node connection management
+**用途**：远程节点连接管理
 
-**Classes**:
-- `RemoteNode`: Single remote node connection
+**类**：
+- `RemoteNode`：单个远程节点连接
 
-**Key Methods**:
-- `setup()`: Establish connection
-  1. Generate unique session ID
-  2. Create SSH tunnel
-  3. Deploy node script
-  4. Start node process
-  5. Connect WebSocket
-  6. Authenticate
+**核心方法**：
+- `setup()`：建立连接
+  1. 生成唯一会话 ID
+  2. 创建 SSH 隧道
+  3. 部署节点脚本
+  4. 启动节点进程
+  5. 连接 WebSocket
+  6. 认证
 
-- `teardown()`: Clean up resources
-  1. Close WebSocket
-  2. Stop node process
-  3. Clean remote temp files
-  4. Close SSH tunnel
+- `teardown()`：清理资源
+  1. 关闭 WebSocket
+  2. 停止节点进程
+  3. 清理远程临时文件
+  4. 关闭 SSH 隧道
 
-- `execute()`: Execute command remotely
-  1. Send WebSocket message
-  2. Wait for response
-  3. Return result
+- `execute()`：远程执行命令
+  1. 发送 WebSocket 消息
+  2. 等待响应
+  3. 返回结果
 
-**Flow**:
+**流程**：
 ```
 setup()
   ├─ _create_ssh_tunnel()
   │   └─ ssh -N -L local:remote user@host
   ├─ _deploy_node()
   │   ├─ mkdir /tmp/nanobot-xxx/
-  │   └─ base64 encode script
+  │   └─ base64 编码脚本
   ├─ _start_node()
   │   └─ uv run nanobot-node.py
   ├─ _connect_websocket()
   │   └─ websockets.connect(ws://localhost:port)
   └─ _authenticate()
-      └─ Send token, wait for ack
+      └─ 发送令牌，等待确认
 ```
 
 ### nanobot/nodes/manager.py
 
-**Purpose**: Manage multiple remote nodes
+**用途**：管理多个远程节点
 
-**Classes**:
-- `NodeManager`: Multi-node manager
+**类**：
+- `NodeManager`：多节点管理器
 
-**Key Methods**:
-- `add_node()`: Add and save node config
-- `remove_node()`: Remove and disconnect node
-- `connect()`: Connect to a node
-- `disconnect()`: Disconnect from a node
-- `execute()`: Execute command on node
-- `execute_on_all()`: Execute on all connected nodes
+**核心方法**：
+- `add_node()`：添加并保存节点配置
+- `remove_node()`：移除并断开节点
+- `connect()`：连接到节点
+- `disconnect()`：断开节点
+- `execute()`：在节点上执行命令
+- `execute_on_all()`：在所有连接的节点上执行
 
-**Connection Pooling**:
-- Maintains dict of `name -> RemoteNode`
-- Auto-connects on execute if not connected
-- Lazy connection (only connects when needed)
+**连接池**：
+- 维护 `name -> RemoteNode` 字典
+- 执行时自动连接（如果未连接）
+- 懒连接（仅在需要时连接）
 
 ### nanobot/agent/tools/nodes.py
 
-**Purpose**: User-facing tool for node management
+**用途**：面向用户的节点管理工具
 
-**Tool Actions**:
-| Action | Method | Description |
-|--------|--------|-------------|
-| `list` | `_list_nodes()` | Show all nodes and status |
-| `add` | `_add_node()` | Add new node configuration |
-| `remove` | `_remove_node()` | Remove node |
-| `connect` | `_connect_node()` | Connect to node |
-| `disconnect` | `_disconnect_node()` | Disconnect from node |
-| `status` | `_node_status()` | Show node details |
-| `exec` | `_exec_command()` | Execute command on node |
+**工具操作**：
+| 操作 | 方法 | 说明 |
+|------|------|------|
+| `list` | `_list_nodes()` | 显示所有节点和状态 |
+| `add` | `_add_node()` | 添加新节点配置 |
+| `remove` | `_remove_node()` | 移除节点 |
+| `connect` | `_connect_node()` | 连接到节点 |
+| `disconnect` | `_disconnect_node()` | 断开节点 |
+| `status` | `_node_status()` | 显示节点详情 |
+| `exec` | `_exec_command()` | 在节点上执行命令 |
 
-**Usage**:
+**用法**：
 ```
 nodes action="list"
 nodes action="add" name="server" ssh_host="user@host"
 nodes action="exec" name="server" command="ls -la"
 ```
 
-### Modified Tools
+### 修改的工具
 
 #### shell.py (ExecTool)
 
-**Changes**:
-- Added `node_manager` parameter
-- Added `node` parameter to schema
-- Added `_execute_remote()` method
-- Delegates to NodeManager for remote execution
+**变更**：
+- 添加 `node_manager` 参数
+- 添加 `node` 参数到 schema
+- 添加 `_execute_remote()` 方法
+- 委托给 NodeManager 进行远程执行
 
-**Flow**:
+**流程**：
 ```
 execute(command, node=None)
   ├─ if node and node_manager:
@@ -166,13 +166,13 @@ execute(command, node=None)
 
 #### filesystem.py (ReadFileTool, WriteFileTool)
 
-**Changes**:
-- Added `node_manager` parameter
-- Added `node` parameter to schema
-- Added `_read_remote()`, `_write_remote()` methods
-- Uses `cat` for reading, `base64` for writing
+**变更**：
+- 添加 `node_manager` 参数
+- 添加 `node` 参数到 schema
+- 添加 `_read_remote()`、`_write_remote()` 方法
+- 使用 `cat` 读取，`base64` 写入
 
-**Write Strategy**:
+**写入策略**：
 ```
 _write_remote(path, content, node)
   ├─ base64.b64encode(content)
@@ -180,26 +180,26 @@ _write_remote(path, content, node)
   │     f"mkdir -p $(dirname {path}) && echo {encoded} | base64 -d > {path}",
   │     node
   │   )
-  └─ Return result
+  └─ 返回结果
 ```
 
 ### scripts/nanobot-node.py
 
-**Purpose**: Deploy to remote servers
+**用途**：部署到远程服务器
 
-**Components**:
-- `TmuxSession`: Manages tmux session
-- `CommandExecutor`: Executes commands via tmux
-- `handle_connection()`: WebSocket handler
+**组件**：
+- `TmuxSession`：管理 tmux 会话
+- `CommandExecutor`：通过 tmux 执行命令
+- `handle_connection()`：WebSocket 处理器
 
-**Protocol**:
+**协议**：
 ```json
-// Authentication
+// 认证
 {"token": "optional-token"}
 
 → {"type": "authenticated", "message": "..."}
 
-// Execute command
+// 执行命令
 {"type": "execute", "command": "ls -la"}
 
 → {"type": "result", "success": true, "output": "...", "error": null}
@@ -209,210 +209,210 @@ _write_remote(path, content, node)
 
 → {"type": "pong"}
 
-// Close
+// 关闭
 {"type": "close"}
 ```
 
-**Usage**:
+**用法**：
 ```bash
-# On remote server
+# 在远程服务器上
 uv run --with websockets nanobot-node.py --port 8765 --token secret
 
-# Without tmux (no session persistence)
+# 不使用 tmux（无会话保持）
 uv run --with websockets nanobot-node.py --no-tmux
 ```
 
-## Integration with Existing Tools
+## 与现有工具的集成
 
-### Tool Initialization
+### 工具初始化
 
-To enable remote node support in tools:
+在工具中启用远程节点支持：
 
 ```python
 from nanobot.nodes.manager import NodeManager
 from nanobot.nodes.config import NodesConfig
 
-# Create node manager
+# 创建节点管理器
 config = NodesConfig.load(NodesConfig.get_default_config_path())
 node_manager = NodeManager(config)
 
-# Initialize tool with node manager
+# 使用节点管理器初始化工具
 exec_tool = ExecTool(node_manager=node_manager)
 read_tool = ReadFileTool(node_manager=node_manager)
 write_tool = WriteFileTool(node_manager=node_manager)
 ```
 
-### Tool Parameter Flow
+### 工具参数流程
 
 ```
-User Request
+用户请求
     ↓
-LLM generates tool call
+LLM 生成工具调用
     ↓
 Tool.execute(command="...", node="server")
     ↓
-Tool checks node parameter
+工具检查 node 参数
     ↓
-If node set:
+如果设置了 node：
     node_manager.execute(command, node)
     ↓
 RemoteNode.execute(command)
     ↓
-WebSocket → Remote → Execute → Return
+WebSocket → 远程 → 执行 → 返回
     ↓
-Result to user
+结果返回用户
 ```
 
-## Error Handling
+## 错误处理
 
-### Connection Errors
+### 连接错误
 
-| Error | Cause | Recovery |
-|-------|-------|----------|
-| SSH tunnel failed | SSH not accessible | Check SSH connectivity |
-| WebSocket timeout | Node not started | Check remote Python/uv |
-| Authentication failed | Invalid token | Check token config |
-| Connection lost | Network issue | Auto-reconnect |
+| 错误 | 原因 | 恢复方法 |
+|------|------|----------|
+| SSH 隧道失败 | SSH 不可访问 | 检查 SSH 连接 |
+| WebSocket 超时 | 节点未启动 | 检查远程 Python/uv |
+| 认证失败 | 无效令牌 | 检查令牌配置 |
+| 连接丢失 | 网络问题 | 自动重连 |
 
-### Command Errors
+### 命令错误
 
-| Error | Cause | Recovery |
-|-------|-------|----------|
-| Timeout | Long-running command | Use background mode |
-| Command failed | Invalid command | Check command syntax |
-| Session lost | tmux crashed | Reconnect (recreates session) |
+| 错误 | 原因 | 恢复方法 |
+|------|------|----------|
+| 超时 | 长时间运行的命令 | 使用后台模式 |
+| 命令失败 | 无效命令 | 检查命令语法 |
+| 会话丢失 | tmux 崩溃 | 重新连接（重建会话） |
 
-## Testing
+## 测试
 
-### Unit Tests
+### 单元测试
 
-See `scripts/test_remote_node.py`:
+参见 `scripts/test_remote_node.py`：
 
 ```python
-# Test config
+# 测试配置
 test_config()
 test_nodes_config()
 test_remote_node_config()
 ```
 
-### Integration Testing
+### 集成测试
 
-To test with real SSH:
+使用真实 SSH 测试：
 
-1. Set up test VM/container
-2. Add node config
-3. Test connection
-4. Test command execution
-5. Verify cleanup
+1. 设置测试虚拟机/容器
+2. 添加节点配置
+3. 测试连接
+4. 测试命令执行
+5. 验证清理
 
-### Manual Testing Checklist
+### 手动测试清单
 
-- [ ] Add node configuration
-- [ ] Connect to node
-- [ ] Execute simple command (`ls`)
-- [ ] Execute command with cd
-- [ ] Verify session persistence
-- [ ] Read remote file
-- [ ] Write remote file
-- [ ] Disconnect
-- [ ] Verify cleanup (no /tmp files left)
+- [ ] 添加节点配置
+- [ ] 连接到节点
+- [ ] 执行简单命令 (`ls`)
+- [ ] 执行带 cd 的命令
+- [ ] 验证会话保持
+- [ ] 读取远程文件
+- [ ] 写入远程文件
+- [ ] 断开连接
+- [ ] 验证清理（无 /tmp 文件残留）
 
-## Performance
+## 性能
 
-### Connection Latency
+### 连接延迟
 
-| Operation | Time | Notes |
-|-----------|------|-------|
-| SSH tunnel | ~200ms | First connection |
-| Deploy script | ~500ms | First connection |
-| Start node | ~2s | First connection (uv install) |
-| WebSocket connect | ~50ms | After tunnel |
-| Command execution | ~10ms | Per command |
-| Subsequent connections | ~250ms | With existing node |
+| 操作 | 时间 | 说明 |
+|------|------|------|
+| SSH 隧道 | ~200ms | 首次连接 |
+| 部署脚本 | ~500ms | 首次连接 |
+| 启动节点 | ~2s | 首次连接（uv 安装） |
+| WebSocket 连接 | ~50ms | 隧道建立后 |
+| 命令执行 | ~10ms | 每条命令 |
+| 后续连接 | ~250ms | 使用现有节点 |
 
-### Optimization
+### 优化
 
-- **Connection Pooling**: Reuse connections
-- **Lazy Connection**: Only connect when needed
-- **Session Reuse**: tmux persists between commands
-- **SSH Tunnel Keepalive**: Maintained by SSH
+- **连接池**：复用连接
+- **懒连接**：仅在需要时连接
+- **会话复用**：tmux 在命令之间保持
+- **SSH 隧道保活**：由 SSH 维护
 
-## Future Enhancements
+## 未来增强
 
-### Planned
+### 已计划
 
-1. **Streaming Output**: Real-time command output
-2. **File Transfer**: Optimized large file handling
-3. **Parallel Execution**: Execute on multiple nodes
-4. **Health Monitoring**: Auto-reconnect on failure
-5. **Certificate Auth**: SSH certificate support
+1. **流式输出**：实时命令输出
+2. **文件传输**：优化大文件处理
+3. **并行执行**：在多个节点上执行
+4. **健康监控**：失败时自动重连
+5. **证书认证**：SSH 证书支持
 
-### Considered
+### 考虑中
 
-1. **Reverse WebSocket**: Remote connects to Gateway
-2. **HTTP Fallback**: Non-WebSocket option
-3. **Docker Support**: Execute in containers
-4. **Kubernetes Support**: Pod execution
+1. **反向 WebSocket**：远程连接到网关
+2. **HTTP 后备**：非 WebSocket 选项
+3. **Docker 支持**：在容器中执行
+4. **Kubernetes 支持**：Pod 执行
 
-## Security Notes
+## 安全说明
 
-### Threat Model
+### 威胁模型
 
-| Threat | Mitigation |
-|--------|------------|
-| SSH hijacking | Use SSH keys, strong auth |
-| WebSocket sniffing | Tunnel through SSH (encrypted) |
-| Command injection | Input validation, guards |
-| Token leakage | Don't log tokens, env vars |
-| Temp file exposure | /tmp permissions (user-only) |
+| 威胁 | 缓解措施 |
+|------|----------|
+| SSH 劫持 | 使用 SSH 密钥、强认证 |
+| WebSocket 窥探 | 通过 SSH 隧道（加密） |
+| 命令注入 | 输入验证、守卫 |
+| 令牌泄露 | 不记录令牌、使用环境变量 |
+| 临时文件暴露 | /tmp 权限（仅用户） |
 
-### Best Practices
+### 最佳实践
 
-1. Use SSH keys, not passwords
-2. Set unique auth tokens per node
-3. Limit node permissions (principle of least privilege)
-4. Use workspace restrictions
-5. Monitor for unusual activity
+1. 使用 SSH 密钥，而非密码
+2. 为每个节点设置唯一的认证令牌
+3. 限制节点权限（最小权限原则）
+4. 使用工作区限制
+5. 监控异常活动
 
-## Debugging
+## 调试
 
-### Enable Debug Logging
+### 启用调试日志
 
 ```python
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
-# Or for specific modules
+# 或针对特定模块
 logging.getLogger("nanobot.nodes").setLevel(logging.DEBUG)
 ```
 
-### Common Issues
+### 常见问题
 
-**Issue**: "SSH tunnel failed"
-- Check: `ssh user@host` works
-- Check: SSH port is correct
-- Check: Firewall allows connection
+**问题**："SSH tunnel failed"（SSH 隧道失败）
+- 检查：`ssh user@host` 可以工作
+- 检查：SSH 端口正确
+- 检查：防火墙允许连接
 
-**Issue**: "WebSocket connection timeout"
-- Check: Remote has Python 3.11+
-- Check: Remote has `uv` installed
-- Check: Remote can install `websockets`
+**问题**："WebSocket connection timeout"（WebSocket 连接超时）
+- 检查：远程有 Python 3.11+
+- 检查：远程已安装 `uv`
+- 检查：远程可以安装 `websockets`
 
-**Issue**: "Command not found on remote"
-- Check: PATH on remote
-- Check: Use absolute paths
-- Check: Command exists on remote
+**问题**："Command not found on remote"（远程找不到命令）
+- 检查：远程的 PATH
+- 检查：使用绝对路径
+- 检查：命令在远程存在
 
-## Contributing
+## 贡献
 
-### Adding New Node-Aware Tools
+### 添加新的节点感知工具
 
-1. Add `node_manager` parameter to `__init__`
-2. Add `node` to parameters schema
-3. Add remote execution method
-4. Update tool description
+1. 在 `__init__` 中添加 `node_manager` 参数
+2. 将 `node` 添加到参数 schema
+3. 添加远程执行方法
+4. 更新工具描述
 
-Example:
+示例：
 ```python
 class MyTool(Tool):
     def __init__(self, node_manager=None):
@@ -431,15 +431,15 @@ class MyTool(Tool):
         return await self._execute_local(param)
 ```
 
-### Adding New Node Actions
+### 添加新的节点操作
 
-1. Add action to `parameters["enum"]` in NodesTool
-2. Add handler method (`_action_name`)
-3. Update description with usage
-4. Add error handling
+1. 在 NodesTool 的 `parameters["enum"]` 中添加操作
+2. 添加处理方法（`_action_name`）
+3. 更新描述中的用法
+4. 添加错误处理
 
-## References
+## 参考资料
 
-- [Design Document](./NANOBOT_NODE_ENHANCEMENT.md)
-- [Usage Guide](./USAGE.md)
-- [Original Fork](https://github.com/EisonMe/nanobot)
+- [设计文档](./NANOBOT_NODE_ENHANCEMENT.md)
+- [使用指南](./USAGE.md)
+- [原始 Fork](https://github.com/EisonMe/nanobot)
