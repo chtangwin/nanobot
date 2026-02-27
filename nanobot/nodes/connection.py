@@ -52,6 +52,11 @@ class RemoteNode:
         self._running = False
         self._authenticated = False
 
+    @property
+    def is_connected(self) -> bool:
+        """Check if the node is connected."""
+        return self._running and self._authenticated
+
     async def setup(self) -> str:
         """
         Establish connection to remote node.

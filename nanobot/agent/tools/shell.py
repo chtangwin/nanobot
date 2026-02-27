@@ -49,7 +49,7 @@ class ExecTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Execute a shell command and return its output. Use with caution. Can execute on remote nodes by specifying the 'node' parameter."
+        return "Execute a shell command and return its output. For remote nodes (e.g., 'on myserver run ls'), use the 'node' parameter instead of manually constructing SSH commands. The node will be auto-connected if needed."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -72,7 +72,7 @@ class ExecTool(Tool):
         if self._node_manager is not None:
             props["properties"]["node"] = {
                 "type": "string",
-                "description": "Optional remote node name to execute on. If not specified, executes locally."
+                "description": "Remote node name to execute command on. When user says 'on <node_name>' or similar, use this parameter. The node must be configured with 'nodes action=\"add\"'. Example: if user says 'on myserver run ls', use node='myserver' and command='ls'. Do not manually construct SSH commands."
             }
 
         return props
