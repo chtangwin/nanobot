@@ -260,15 +260,39 @@ class RemoteNode:
         logger.info(f"Creating remote directory: {remote_dir}")
         await self._ssh_exec(f"mkdir -p {remote_dir}")
 
-        # Upload script (base64 encoded to avoid shell escaping issues)
+        # Write node_server.py to a local temp file first
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(_NODE_SCRIPT)
+            local_script_path = f.name
+
+        # Upload node_server.py via scp
         logger.info(f"Uploading node_server.py to {remote_dir}")
-        encoded_script = base64.b64encode(_NODE_SCRIPT.encode()).decode()
-        await self._ssh_exec(
-            f"echo {encoded_script} | base64 -d > {remote_dir}/node_server.py"
+        scp_cmd = ["scp"]
+        if self.config.ssh_port:
+            scp_cmd.extend(["-P", str(self.config.ssh_port)])
+        if self.config.ssh_key_path:
+            scp_cmd.extend(["-i", self.config.ssh_key_path])
+        scp_cmd.extend([local_script_path, f"{self.config.ssh_host}:{remote_dir}/node_server.py"])
+
+        process = await asyncio.create_subprocess_exec(
+            *scp_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        stdout, stderr = await process.communicate()
+
+        # Clean up temp file
+        import os
+        os.unlink(local_script_path)
+
+        if process.returncode != 0:
+            error_msg = stderr.decode() if stderr else "Unknown error"
+            raise RuntimeError(f"Failed to upload node_server.py: {error_msg}")
+
         logger.info(f"Script uploaded successfully")
 
-        # Create config file
+        # Create and upload config.json
         config = {
             "port": self.config.remote_port,
             "tmux": True,  # Enable tmux for session persistence
@@ -278,13 +302,37 @@ class RemoteNode:
 
         import json
         config_json = json.dumps(config, indent=2)
-        encoded_config = base64.b64encode(config_json.encode()).decode()
 
+        # Write config to local temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write(config_json)
+            local_config_path = f.name
+
+        # Upload config.json via scp
         logger.info(f"Uploading config.json to {remote_dir}")
         logger.info(f"Config: port={config['port']}, tmux={config['tmux']}, token={'***' if config.get('token') else 'none'}")
-        await self._ssh_exec(
-            f"echo {encoded_config} | base64 -d > {remote_dir}/config.json"
+
+        scp_cmd = ["scp"]
+        if self.config.ssh_port:
+            scp_cmd.extend(["-P", str(self.config.ssh_port)])
+        if self.config.ssh_key_path:
+            scp_cmd.extend(["-i", self.config.ssh_key_path])
+        scp_cmd.extend([local_config_path, f"{self.config.ssh_host}:{remote_dir}/config.json"])
+
+        process = await asyncio.create_subprocess_exec(
+            *scp_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        stdout, stderr = await process.communicate()
+
+        # Clean up temp file
+        os.unlink(local_config_path)
+
+        if process.returncode != 0:
+            error_msg = stderr.decode() if stderr else "Unknown error"
+            raise RuntimeError(f"Failed to upload config.json: {error_msg}")
+
         logger.info(f"Config uploaded successfully")
 
     async def _start_node(self):
@@ -368,11 +416,11 @@ class RemoteNode:
 
     async def _authenticate(self):
         """Authenticate with the remote node."""
-        if self.config.auth_token:
-            auth_message = {
-                "token": self.config.auth_token,
-            }
-            await self.websocket.send(json.dumps(auth_message))
+        # Send authentication message (with or without token)
+        auth_message = {
+            "token": self.config.auth_token if self.config.auth_token else "",
+        }
+        await self.websocket.send(json.dumps(auth_message))
 
         # Wait for authentication response
         response = await asyncio.wait_for(

@@ -180,7 +180,7 @@ class CommandExecutor:
             self.tmux.kill()
 
 
-async def handle_connection(websocket, path, auth_token: str, use_tmux: bool):
+async def handle_connection(websocket, auth_token: str, use_tmux: bool):
     """Handle WebSocket connection."""
     logger.info(f"New connection from {websocket.remote_address}")
 
@@ -347,7 +347,7 @@ async def main():
         loop.add_signal_handler(sig, signal_handler)
 
     # Start server
-    handler = lambda ws, path: handle_connection(ws, path, token, use_tmux)
+    handler = lambda ws: handle_connection(ws, token, use_tmux)
 
     async with websockets.serve(handler, "0.0.0.0", port):
         logger.info(f"Server listening on ws://0.0.0.0:{port}")
