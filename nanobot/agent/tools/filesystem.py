@@ -86,19 +86,6 @@ class ReadFileTool(Tool):
 
         # Local read
         return await self._read_local(path)
-        try:
-            file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
-            if not file_path.exists():
-                return f"Error: File not found: {path}"
-            if not file_path.is_file():
-                return f"Error: Not a file: {path}"
-
-            content = file_path.read_text(encoding="utf-8")
-            return content
-        except PermissionError as e:
-            return f"Error: {e}"
-        except Exception as e:
-            return f"Error reading file: {str(e)}"
 
     async def _read_local(self, path: str) -> str:
         """Read file locally."""
@@ -194,15 +181,6 @@ class WriteFileTool(Tool):
 
         # Local write
         return await self._write_local(path, content)
-        try:
-            file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(content, encoding="utf-8")
-            return f"Successfully wrote {len(content)} bytes to {file_path}"
-        except PermissionError as e:
-            return f"Error: {e}"
-        except Exception as e:
-            return f"Error writing file: {str(e)}"
 
     async def _write_local(self, path: str, content: str) -> str:
         """Write file locally."""
