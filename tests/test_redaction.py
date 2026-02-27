@@ -242,24 +242,38 @@ class TestRedactText:
         # Long key (should be redacted)
         text = 'api_key: "sk-abcdef1234567890"'
         result = redact_text(text)
-        assert 'api_key: "***"' in result
+        assert "api_key***" in result  # Non-JSON format: separator removed
+        assert "sk-abcdef1234567890" not in result
+
+        # JSON format (SHOULD be redacted - this is the fix)
+        text2 = '"api_key": "sk-abcdef1234567890"'
+        result2 = redact_text(text2)
+        assert '"api_key": "***"' in result2  # JSON format: preserved
+        assert "sk-abcdef1234567890" not in result2
 
         # Short value (should NOT be redacted)
-        text2 = "api_key=x"
-        result2 = redact_text(text2)
-        assert "api_key=x" in result2  # Not redacted
+        text3 = "api_key=x"
+        result3 = redact_text(text3)
+        assert "api_key=x" in result3  # Not redacted
 
         # Medium value (should be redacted, 8+ chars)
-        text3 = "api_key=12345678"
-        result3 = redact_text(text3)
-        assert "api_key=***" in result3
+        text4 = "api_key=12345678"
+        result4 = redact_text(text4)
+        assert "api_key***" in result4  # Non-JSON: separator removed
+        assert "12345678" not in result4
 
     def test_password_kv(self):
         """Test password key-value redaction."""
         text = 'password: "mypassword123"'
         result = redact_text(text)
-        assert 'password: "***"' in result
+        assert "password***" in result  # Non-JSON format
         assert "mypassword123" not in result
+
+        # JSON format (SHOULD be redacted)
+        text2 = '"password": "mypassword123"'
+        result2 = redact_text(text2)
+        assert '"password": "***"' in result2  # JSON format: preserved
+        assert "mypassword123" not in result2
 
     def test_token_kv(self):
         """Test token key-value redaction."""
@@ -297,9 +311,9 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj
         Bearer eyJhbGciOiJIUzI1NiJ9
         """
         result = redact_text(text)
-        # api_key=sk-xxx caught by api_key_kv -> api_key=***
-        assert "api_key=***" in result
-        assert "password: ***" in result
+        # api_key=sk-xxx caught by api_key_kv -> api_key*** (separator removed)
+        assert "api_key***" in result
+        assert "password***" in result
         assert "Bearer ***" in result
         # Make sure the actual secrets are gone
         assert "sk-1234567890" not in result
@@ -339,6 +353,67 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj
         """Test non-string input handling."""
         assert redact_text(123) == 123
         assert redact_text(None) is None
+
+    def test_json_format_key_value(self):
+        """Test JSON format key-value redaction.
+
+        This tests the fix for the security issue where JSON format
+        key-value pairs like "apiKey": "xxx" were not being redacted.
+        """
+        # JSON double quotes format (SHOULD be redacted)
+        text = '"apiKey": "7b131231jefjajfas"'
+        result = redact_text(text)
+        assert '"apiKey": "***"' in result
+        assert "7b131231jefjajfas" not in result
+
+        # JSON in object context
+        text2 = '{"apiKey": "7b131231jefjajfas", "apiBase": "https://api.z.ai/api/coding/paas/v4/"}'
+        result2 = redact_text(text2)
+        assert '"apiKey": "***"' in result2
+        assert "7b131231jefjajfas" not in result2
+
+        # JSON with indentation (from cat auth.json)
+        text3 = '''{
+  "apiKey": "7b131231jefjajfas",
+  "apiBase": "https://api.z.ai/api/coding/paas/v4/"
+}'''
+        result3 = redact_text(text3)
+        assert '"apiKey": "***"' in result3
+        assert "7b131231jefjajfas" not in result3
+        assert "apiBase" in result3  # Other keys preserved
+        assert "https://api.z.ai" in result3  # URLs preserved
+
+        # Password in JSON format
+        text4 = '"password": "mypassword123"'
+        result4 = redact_text(text4)
+        assert '"password": "***"' in result4
+        assert "mypassword123" not in result4
+
+        # Token in JSON format
+        text5 = '"access_token": "abc123def456"'
+        result5 = redact_text(text5)
+        assert '"access_token": "***"' in result5
+        assert "abc123def456" not in result5
+
+        # Secret in JSON format
+        text6 = '"client_secret": "supersecretvalue"'
+        result6 = redact_text(text6)
+        assert '"client_secret": "***"' in result6
+        assert "supersecretvalue" not in result6
+
+        # Mixed: JSON and non-JSON formats
+        text7 = 'apiKey=12345678 AND "apiKey": "yyy12345678"'
+        result7 = redact_text(text7)
+        assert "apiKey***" in result7  # Non-JSON: separator removed
+        assert '"apiKey": "***"' in result7  # JSON: format preserved
+
+        # Real-world auth.json example (bash cat output)
+        text8 = '''     "apiKey": "7b131231jefjajfas",
+       "apiBase": "https://api.z.ai/api/coding/paas/v4/"'''
+        result8 = redact_text(text8)
+        assert '"apiKey": "***"' in result8
+        assert "7b131231jefjajfas" not in result8
+        assert "https://api.z.ai" in result8  # URL preserved
 
 
 class TestRedactContent:

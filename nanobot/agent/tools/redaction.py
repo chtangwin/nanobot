@@ -21,29 +21,53 @@ REDACTION_RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("slack_token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"), "xox***"),
     # Bearer tokens ( tightened - require minimum 20 chars)
     ("bearer", re.compile(r"\bBearer\s+[A-Za-z0-9._~+\/-]{20,}=*\b", re.I), "Bearer ***"),
-    # Password key-value patterns (must be before general api_key to avoid partial matches)
+    # Password key-value patterns - JSON format (double quotes)
+    (
+        "password_kv_json",
+        re.compile(r'"(\bpassword\b)"\s*:\s*"[^"]+"', re.I),
+        r'"\1": "***"',
+    ),
+    # Password key-value patterns - non-JSON format
     (
         "password_kv",
-        re.compile(r"(\bpassword\b\s*[:=]\s*[\"']?)[^\"'\s,}]+([\"']?)", re.I),
-        r"\1***\2",
+        re.compile(r'(\bpassword\b)\s*[:=]\s*["\']?[^"\'\s,}]+["\']?', re.I),
+        r'\1***',
     ),
-    # API key key-value patterns (tightened - require minimum 8 chars)
+    # API key key-value patterns - JSON format (double quotes, min 8 chars)
+    (
+        "api_key_kv_json",
+        re.compile(r'"(\bapi[_-]?key\b)"\s*:\s*"[^"]{8,}"', re.I),
+        r'"\1": "***"',
+    ),
+    # API key key-value patterns - non-JSON format (min 8 chars)
     (
         "api_key_kv",
-        re.compile(r"(\bapi[_-]?key\b\s*[:=]\s*[\"']?)[^\"'\s,}]{8,}([\"']?)", re.I),
-        r"\1***\2",
+        re.compile(r'(\bapi[_-]?key\b)\s*[:=]\s*["\']?[^"\'\s,}]{8,}["\']?', re.I),
+        r'\1***',
     ),
-    # Token key-value patterns
+    # Token key-value patterns - JSON format (double quotes)
+    (
+        "token_kv_json",
+        re.compile(r'"(\b(?:token|access[_-]?token|refresh[_-]?token)\b)"\s*:\s*"[^"]+"', re.I),
+        r'"\1": "***"',
+    ),
+    # Token key-value patterns - non-JSON format
     (
         "token_kv",
-        re.compile(r"(\b(token|access[_-]?token|refresh[_-]?token)\b\s*[:=]\s*[\"']?)[^\"'\s,}]+([\"']?)", re.I),
-        r"\1***\3",
+        re.compile(r'(\b(?:token|access[_-]?token|refresh[_-]?token)\b)\s*[:=]\s*["\']?[^"\'\s,}]+["\']?', re.I),
+        r'\1***',
     ),
-    # Secret key-value patterns
+    # Secret key-value patterns - JSON format (double quotes)
+    (
+        "secret_kv_json",
+        re.compile(r'"(\b(?:secret|client[_-]?secret|private[_-]?key)\b)"\s*:\s*"[^"]+"', re.I),
+        r'"\1": "***"',
+    ),
+    # Secret key-value patterns - non-JSON format
     (
         "secret_kv",
-        re.compile(r"(\b(secret|client[_-]?secret|private[_-]?key)\b\s*[:=]\s*[\"']?)[^\"'\s,}]+([\"']?)", re.I),
-        r"\1***\3",
+        re.compile(r'(\b(?:secret|client[_-]?secret|private[_-]?key)\b)\s*[:=]\s*["\']?[^"\'\s,}]+["\']?', re.I),
+        r'\1***',
     ),
 ]
 
