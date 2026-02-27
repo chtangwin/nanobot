@@ -2,7 +2,7 @@
 
 import difflib
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Union
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.redaction import is_sensitive_path
@@ -79,7 +79,7 @@ class ReadFileTool(Tool):
 
         return props
 
-    async def execute(self, path: str, node: str | None = None, **kwargs: Any) str:
+    async def execute(self, path: str, node: Union[str, None] = None, **kwargs: Any) -> str:
         # Handle remote node read
         if node and self._node_manager:
             return await self._read_remote(path, node)
@@ -174,7 +174,7 @@ class WriteFileTool(Tool):
 
         return props
 
-    async def execute(self, path: str, content: str, node: str | None = None, **kwargs: Any) -> str:
+    async def execute(self, path: str, content: str, node: Union[str, None] = None, **kwargs: Any) -> str:
         # Handle remote node write
         if node and self._node_manager:
             return await self._write_remote(path, content, node)
