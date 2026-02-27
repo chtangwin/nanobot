@@ -367,3 +367,96 @@ class ListDirTool(Tool):
             return f"Error: {e}"
         except Exception as e:
             return f"Error listing directory: {str(e)}"
+
+
+class CompareTool(Tool):
+    """Compare local and remote files using diff."""
+
+    name = "compare"
+    description = "Compare a local file with a remote file on a node. " \
+                  "Use this when you want to see differences between files. " \
+                  "Returns unified diff format."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "local_path": {
+                "type": "string",
+                "description": "Path to local file",
+            },
+            "remote_path": {
+                "type": "string",
+                "description": "Path to remote file",
+            },
+            "node": {
+                "type": "string",
+                "description": "Node name (e.g., 'myserver')",
+            },
+        },
+        "required": ["local_path", "remote_path", "node"]
+    }
+
+    def __init__(
+        self,
+        workspace: Union[Path, None] = None,
+        allowed_dir: Union[Path, None] = None,
+        block_sensitive: bool = True,
+        node_manager: Union["NodeManager", None] = None,
+    ):
+        self._workspace = workspace
+        self._allowed_dir = allowed_dir
+        self._block_sensitive = block_sensitive
+        self._node_manager = node_manager
+
+    def set_node_manager(self, node_manager: "NodeManager"):
+        self._node_manager = node_manager
+
+    async def execute(
+        self,
+        local_path: str,
+        remote_path: str,
+        node: str,
+        **kwargs: Any
+    ) -> str:
+        # Read local file
+        try:
+            local_file = _resolve_path(local_path, self._workspace, self._allowed_dir, self._block_sensitive)
+            local_content = local_file.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return f"Error: Local file not found: {local_path}"
+        except PermissionError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error reading local file: {str(e)}"
+
+        # Read remote file via node
+        if not self._node_manager:
+            return "Error: Node manager not available"
+
+        try:
+            result = await self._node_manager.execute(
+                f"cat {remote_path}",
+                node=node,
+                timeout=30.0,
+            )
+            if not result.get("success"):
+                return f"Error reading remote file: {result.get('error')}"
+            remote_content = result.get("output", "")
+        except Exception as e:
+            return f"Error reading remote file: {str(e)}"
+
+        # Compare using difflib
+        local_lines = local_content.splitlines()
+        remote_lines = remote_content.splitlines()
+
+        diff = list(difflib.unified_diff(
+            local_lines,
+            remote_lines,
+            fromfile=f"local:{local_path}",
+            tofile=f"remote:{node}:{remote_path}",
+            lineterm=""
+        ))
+
+        if not diff:
+            return f"Files are identical: {local_path} == {node}:{remote_path}"
+
+        return "Files differ:\n" + "\n".join(diff)
