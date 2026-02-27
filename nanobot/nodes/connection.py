@@ -415,10 +415,10 @@ class RemoteNode:
 
             await asyncio.sleep(0.5)
 
-            # Clean up temporary directory
-            await self._ssh_exec(
-                f"rm -rf /tmp/{self.session_id}"
-            )
+            # Clean up - use remote_dir variable
+            logger.info(f"Cleaning up {remote_dir}...")
+            result = await self._ssh_exec(f"rm -rf {remote_dir}")
+            logger.info(f"Cleanup result: {result}")
 
     async def _connect_websocket(self):
         """Connect to remote node via WebSocket."""
@@ -478,11 +478,14 @@ class RemoteNode:
 
     async def _ssh_exec(self, command: str) -> str:
         """Execute a command via SSH."""
+        import subprocess
+        
         ssh_cmd = [
             "ssh",
             "-p", str(self.config.ssh_port),
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "BatchMode=yes",
         ]
 
         if self.config.ssh_key_path:
@@ -490,8 +493,42 @@ class RemoteNode:
 
         ssh_cmd.extend([self.config.ssh_host, command])
 
+        # For background commands (& at end), use subprocess.Popen to avoid hanging
+        if command.strip().endswith('&'):
+            proc = subprocess.Popen(
+                ssh_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return ""
+            
+        # For regular commands, use asyncio
         process = await asyncio.create_subprocess_exec(
             *ssh_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            stderr_text = stderr.decode() if stderr else ""
+            # Log but don't fail on warnings
+            if "Warning: Permanently added" not in stderr_text:
+                logger.warning(f"SSH failed (code {process.returncode}): {stderr_text}")
+
+        return stdout.decode().strip()
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.setup()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.teardown()
+
+    @property
+    def is_connected(self) -> bool:
+        """Check if node is connected."""
+        return self._running and self._authenticated
