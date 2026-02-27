@@ -1,148 +1,148 @@
-# Remote Node Usage Guide
+# 远程节点使用指南
 
-> How to use nanobot's remote execution capabilities
+> 如何使用 nanobot 的远程执行能力
 
-## Overview
+## 概述
 
-Remote nodes allow nanobot to execute commands on remote machines as if they were local. The system:
+远程节点允许 nanobot 在远程机器上执行命令，就像在本地一样。该系统：
 
-- ✅ Requires zero installation on remote servers
-- ✅ Maintains session context (tmux)
-- ✅ Automatically manages SSH tunnels
-- ✅ Cleans up after disconnect (zero trace)
+- ✅ 在远程服务器上无需安装任何软件
+- ✅ 保持会话上下文（tmux）
+- ✅ 自动管理 SSH 隧道
+- ✅ 断开后自动清理（零痕迹）
 
-## Quick Start
+## 快速开始
 
-### 1. Add a Remote Node
+### 1. 添加远程节点
 
 ```
-User: "Add a node for build-server at user@192.168.1.100"
+用户："为 build-server 添加一个节点，地址是 user@192.168.1.100"
 
-Nanobot will use:
+Nanobot 会调用：
 nodes action="add" name="build-server" ssh_host="user@192.168.1.100"
 ```
 
-### 2. Connect to the Node
+### 2. 连接到节点
 
 ```
-User: "Connect to build-server"
+用户："连接到 build-server"
 
-Nanobot will use:
+Nanobot 会调用：
 nodes action="connect" name="build-server"
 ```
 
-### 3. Execute Commands Remotely
+### 3. 远程执行命令
 
 ```
-User: "Run ls -la on build-server"
+用户："在 build-server 上运行 ls -la"
 
-Nanobot will use:
+Nanobot 会调用：
 exec command="ls -la" node="build-server"
 ```
 
-## Available Actions
+## 可用操作
 
-### nodes tool actions:
+### nodes 工具操作：
 
-| Action | Description | Required Parameters |
-|--------|-------------|---------------------|
-| `list` | List all configured nodes | - |
-| `add` | Add a new node | `name`, `ssh_host` |
-| `remove` | Remove a node | `name` |
-| `connect` | Connect to a node | `name` |
-| `disconnect` | Disconnect from a node | `name` |
-| `status` | Get node status | `name` |
-| `exec` | Execute command on node | `name`, `command` |
+| 操作 | 说明 | 必需参数 |
+|------|------|---------|
+| `list` | 列出所有已配置的节点 | - |
+| `add` | 添加新节点 | `name`、`ssh_host` |
+| `remove` | 移除节点 | `name` |
+| `connect` | 连接到节点 | `name` |
+| `disconnect` | 断开节点连接 | `name` |
+| `status` | 获取节点状态 | `name` |
+| `exec` | 在节点上执行命令 | `name`、`command` |
 
-## Node-Aware Tools
+## 支持节点的工具
 
-These tools support the `node` parameter:
+这些工具支持 `node` 参数：
 
 ### exec
 
 ```
-# Local execution
+# 本地执行
 exec command="ls -la"
 
-# Remote execution
+# 远程执行
 exec command="ls -la" node="build-server"
 
-# With working directory
+# 指定工作目录
 exec command="pytest" node="build-server" working_dir="/app"
 ```
 
 ### read_file
 
 ```
-# Local file
+# 本地文件
 read_file path="/etc/config.py"
 
-# Remote file
+# 远程文件
 read_file path="/etc/nginx.conf" node="prod-server"
 ```
 
 ### write_file
 
 ```
-# Local file
+# 本地文件
 write_file path="/tmp/test.txt" content="Hello"
 
-# Remote file
+# 远程文件
 write_file path="/app/config.json" node="build-server" content='{"key": "value"}'
 ```
 
-## Examples
+## 使用示例
 
-### Example 1: Analyze Remote Project
+### 示例 1：分析远程项目
 
 ```
-User: "Connect to build-server and analyze the /app project"
+用户："连接到 build-server 并分析 /app 项目"
 
-Nanobot:
+Nanobot：
 1. nodes action="connect" name="build-server"
 2. exec command="find /app -name '*.py' | head -20" node="build-server"
 3. read_file path="/app/main.py" node="build-server"
 4. read_file path="/app/utils.py" node="build-server"
-5. [Analysis and summary]
+5. [分析和总结]
 ```
 
-### Example 2: Run Tests on Remote Server
+### 示例 2：在远程服务器上运行测试
 
 ```
-User: "Run the test suite on build-server"
+用户："在 build-server 上运行测试套件"
 
-Nanobot:
+Nanobot：
 exec command="cd /app && pytest -v" node="build-server"
 ```
 
-### Example 3: Deploy to Production
+### 示例 3：部署到生产环境
 
 ```
-User: "Deploy the new version to prod-server"
+用户："将新版本部署到 prod-server"
 
-Nanobot:
+Nanobot：
 1. exec command="cd /app && git pull origin main" node="prod-server"
 2. exec command="cd /app && pip install -r requirements.txt" node="prod-server"
 3. exec command="systemctl restart myapp" node="prod-server"
 4. exec command="systemctl status myapp" node="prod-server"
 ```
 
-### Example 4: Session Persistence
+### 示例 4：会话保持
 
 ```
-User: "cd to /project on build-server"
+用户："在 build-server 上 cd 到 /project"
 → exec command="cd /project" node="build-server"
 
-User: "List files" (10 minutes later)
+用户："列出文件"（10分钟后）
 → exec command="ls" node="build-server"
-→ [Shows files in /project - session persists!]
+→ [显示 /project 中的文件 - 会话保持！]
 ```
 
-## Configuration
+## 配置
 
-### Node Configuration File
+### 节点配置文件
 
-Nodes are stored in `~/.nanobot/nodes.json`:
+节点配置存储在 `~/.nanobot/nodes.json`：
 
 ```json
 {
@@ -168,176 +168,176 @@ Nodes are stored in `~/.nanobot/nodes.json`:
 }
 ```
 
-### Adding Nodes with Options
+### 添加节点时指定选项
 
 ```
-# Basic
+# 基本配置
 nodes action="add" name="server" ssh_host="user@host"
 
-# With SSH key
+# 使用 SSH 密钥
 nodes action="add" name="server" ssh_host="user@host" ssh_key_path="~/.ssh/id_rsa"
 
-# With custom port
+# 自定义端口
 nodes action="add" name="server" ssh_host="user@host" ssh_port=2222
 
-# With workspace
+# 指定工作区
 nodes action="add" name="server" ssh_host="user@host" workspace="/app"
 ```
 
-## How It Works
+## 工作原理
 
-### Connection Flow
-
-```
-1. User: "Connect to build-server"
-2. Gateway: SSH → build-server
-3. Gateway: Deploy nanobot-node.py to /tmp/nanobot-xxx/
-4. Gateway: Start uv run nanobot-node.py (WebSocket server)
-5. Gateway: Create SSH tunnel (localhost:XXXX → remote:8765)
-6. Gateway: Connect WebSocket through tunnel
-7. Gateway: Create tmux session on remote
-8. [Ready for commands]
-```
-
-### Command Execution Flow
+### 连接流程
 
 ```
-1. User: "Run pytest on build-server"
-2. Gateway: WebSocket message → remote node
-3. Remote: tmux send-keys "pytest"
-4. Remote: tmux capture-pane
-5. Remote: WebSocket response → Gateway
-6. Gateway: Display result to user
+1. 用户："连接到 build-server"
+2. 网关：SSH → build-server
+3. 网关：部署 nanobot-node.py 到 /tmp/nanobot-xxx/
+4. 网关：启动 uv run nanobot-node.py（WebSocket 服务器）
+5. 网关：创建 SSH 隧道（localhost:XXXX → remote:8765）
+6. 网关：通过隧道连接 WebSocket
+7. 网关：在远程创建 tmux 会话
+8. [准备执行命令]
 ```
 
-### Cleanup on Disconnect
+### 命令执行流程
 
 ```
-1. Gateway: Close WebSocket
-2. Gateway: Kill tmux session on remote
-3. Gateway: rm -rf /tmp/nanobot-xxx/
-4. Gateway: Close SSH tunnel
-5. [Remote server clean - no trace]
+1. 用户："在 build-server 上运行 pytest"
+2. 网关：WebSocket 消息 → 远程节点
+3. 远程：tmux send-keys "pytest"
+4. 远程：tmux capture-pane
+5. 远程：WebSocket 响应 → 网关
+6. 网关：向用户显示结果
 ```
 
-## Requirements
+### 断开连接时的清理
 
-### Local (Gateway)
+```
+1. 网关：关闭 WebSocket
+2. 网关：杀死远程的 tmux 会话
+3. 网关：rm -rf /tmp/nanobot-xxx/
+4. 网关：关闭 SSH 隧道
+5. [远程服务器清理干净 - 无痕迹]
+```
+
+## 环境要求
+
+### 本地（网关）
 
 - Python 3.11+
-- SSH client
-- `websockets` package (already in nanobot dependencies)
+- SSH 客户端
+- `websockets` 包（已在 nanobot 依赖中）
 
-### Remote
+### 远程
 
-- SSH server
-- Python 3.11+ (or uv will install it)
+- SSH 服务器
+- Python 3.11+（或 uv 会安装它）
 - `bash`
-- `tmux` (optional, for session persistence)
+- `tmux`（可选，用于会话保持）
 
-### First Remote Connection
+### 首次远程连接
 
-On first connection, remote must have:
-- `uv` (curl installer will auto-install if missing)
+首次连接时，远程必须具备：
+- `uv`（如果缺失会通过 curl 安装程序自动安装）
 
-Example:
+示例：
 ```bash
-# On remote, if uv is missing:
+# 在远程上，如果缺少 uv：
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-## Troubleshooting
+## 故障排查
 
-### Connection Fails
-
-```
-User: "Connect to build-server"
-Response: "Error: Failed to connect to 'build-server': ..."
-
-Check:
-1. SSH access: ssh user@host
-2. Python on remote: python3 --version
-3. uv on remote: uv --version
-4. Network connectivity
-```
-
-### Command Timeout
+### 连接失败
 
 ```
-User: "Run long-running task on build-server"
-Response: "Error: Command timed out after 30.0 seconds"
+用户："连接到 build-server"
+响应："错误：无法连接到 'build-server'：..."
 
-Solution:
-- Use background mode: exec command="nohup command &" node="server"
-- Or increase timeout in tool configuration
+检查：
+1. SSH 访问：ssh user@host
+2. 远程 Python：python3 --version
+3. 远程 uv：uv --version
+4. 网络连接
 ```
 
-### Session Lost
+### 命令超时
 
 ```
-User: "My cd didn't persist!"
-→ tmux might have crashed
+用户："在 build-server 上运行长时间任务"
+响应："错误：命令在 30.0 秒后超时"
 
-Solution:
-- Reconnect: nodes action="connect" name="server"
-- Session will be recreated
+解决方案：
+- 使用后台模式：exec command="nohup command &" node="server"
+- 或增加工具配置中的超时时间
 ```
 
-## Advanced Usage
-
-### Multiple Nodes
+### 会话丢失
 
 ```
-User: "Run tests on all servers"
+用户："我的 cd 没有保持！"
+→ tmux 可能崩溃了
 
-Nanobot:
+解决方案：
+- 重新连接：nodes action="connect" name="server"
+- 会话将被重新创建
+```
+
+## 高级用法
+
+### 多节点管理
+
+```
+用户："在所有服务器上运行测试"
+
+Nanobot：
 1. nodes action="connect" name="build-server"
 2. nodes action="connect" name="test-server"
 3. exec command="pytest" node="build-server"
 4. exec command="pytest" node="test-server"
 ```
 
-### Subagent with Remote
+### 使用 Subagent 处理远程任务
 
 ```
-User: "Analyze the code on build-server"
+用户："分析 build-server 上的代码"
 
-Nanobot:
-1. Spawns subagent with node="build-server" context
-2. Subagent uses:
+Nanobot：
+1. 生成带有 node="build-server" 上下文的 subagent
+2. Subagent 使用：
    - exec(command, node="build-server")
    - read_file(path, node="build-server")
    - write_file(path, content, node="build-server")
-3. Subagent returns analysis
+3. Subagent 返回分析结果
 ```
 
-### Background Tasks
+### 后台任务
 
 ```
-User: "Start dev server on build-server in background"
+用户："在 build-server 上后台启动开发服务器"
 
 exec command="cd /app && nohup npm run dev > /tmp/dev.log 2>&1 &" node="build-server"
 
-# Check logs later
+# 稍后查看日志
 exec command="tail -f /tmp/dev.log" node="build-server"
 ```
 
-## Security Considerations
+## 安全考虑
 
-1. **SSH Keys**: Use SSH keys instead of passwords
-2. **Auth Tokens**: Set unique tokens for each node
-3. **File Permissions**: Remote scripts use /tmp (per-user)
-4. **Command Guards**: Local exec tool still guards dangerous commands
+1. **SSH 密钥**：使用 SSH 密钥而不是密码
+2. **认证令牌**：为每个节点设置唯一的令牌
+3. **文件权限**：远程脚本使用 /tmp（用户级）
+4. **命令守卫**：本地 exec 工具仍然会阻止危险命令
 
-## Best Practices
+## 最佳实践
 
-1. **Workspace**: Set a default workspace per node
-2. **Named Nodes**: Use descriptive node names (prod-1, staging, etc.)
-3. **Session Management**: Disconnect when done to free resources
-4. **Testing**: Test connectivity before running critical commands
-5. **Backup**: Keep local backups of critical remote files
+1. **工作区**：为每个节点设置默认工作区
+2. **节点命名**：使用描述性的节点名称（prod-1、staging 等）
+3. **会话管理**：完成后断开连接以释放资源
+4. **测试**：在运行关键命令前测试连接
+5. **备份**：在本地保留关键远程文件的备份
 
-## See Also
+## 相关文档
 
-- [Design Document](./NANOBOT_NODE_ENHANCEMENT.md)
-- [Implementation Notes](./IMPLEMENTATION.md)
+- [设计文档](./NANOBOT_NODE_ENHANCEMENT.md)
+- [实现说明](./IMPLEMENTATION.md)
