@@ -100,6 +100,12 @@ class RemoteNode:
 
         except Exception as e:
             logger.error(f"Failed to setup remote node {self.config.name}: {e}")
+            # Try to get remote logs for debugging
+            try:
+                remote_log = await self._get_remote_log()
+                logger.error(f"Remote node log:\n{remote_log}")
+            except Exception:
+                pass
             await self.teardown()
             raise ConnectionError(f"Failed to connect to {self.config.name}: {e}")
 
@@ -265,6 +271,7 @@ class RemoteNode:
     async def _start_node(self):
         """Start the node process on remote server."""
         remote_dir = f"/tmp/{self.session_id}"
+        log_file = f"{remote_dir}/node_server.log"
 
         # Build command with configuration
         # Use && to chain commands properly
@@ -277,15 +284,29 @@ class RemoteNode:
         if self.config.auth_token:
             cmd_parts.extend(["--token", self.config.auth_token])
 
-        # Chain commands with && and redirect output
-        cmd = " && ".join(cmd_parts) + " > /dev/null 2>&1 &"
+        # Chain commands with && and redirect output to log file
+        cmd = " && ".join(cmd_parts) + f" > {log_file} 2>&1 &"
         logger.info(f"Starting node on remote: {cmd}")
+        logger.info(f"Remote log file: {log_file}")
 
         await self._ssh_exec(cmd)
 
         # Wait for node to start
         logger.info(f"Waiting {3}s for node to start...")
         await asyncio.sleep(3)
+
+    async def _get_remote_log(self, tail_lines: int = 50) -> str:
+        """Get remote node server log."""
+        if not self.session_id:
+            return "No session ID"
+
+        log_file = f"/tmp/{self.session_id}/node_server.log"
+
+        try:
+            result = await self._ssh_exec(f"tail -{tail_lines} {log_file} 2>/dev/null || echo 'Log file not found'")
+            return result
+        except Exception as e:
+            return f"Failed to get log: {e}"
 
     async def _stop_node(self):
         """Stop the node process on remote server."""

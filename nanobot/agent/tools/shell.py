@@ -139,6 +139,8 @@ class ExecTool(Tool):
             if len(result) > max_len:
                 result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
 
+            # Add execution info for debugging
+            result = f"🔧 Tool: exec\n📁 CWD: {cwd}\n⚡ Cmd: {command}\n\n{result}"
             return result
             
         except Exception as e:
@@ -216,11 +218,15 @@ class ExecTool(Tool):
                 output = result["output"] or "(no output)"
                 if result.get("error"):
                     output += f"\nSTDERR:\n{result['error']}"
+                # Add execution info for debugging
+                cwd_info = f"📁 CWD: {working_dir}" if working_dir else "📁 CWD: (default)"
+                output = f"🔧 Tool: exec\n🌐 Node: {node}\n{cwd_info}\n⚡ Cmd: {command}\n\n{output}"
                 return output
             else:
-                return f"Error: {result['error'] or 'Command failed'}"
+                error = result['error'] or 'Command failed'
+                return f"🔧 Tool: exec\n🌐 Node: {node}\n⚡ Cmd: {command}\n\n❌ Error: {error}"
 
         except KeyError:
             return f"Error: Node '{node}' not found. Use 'nodes action=\"add\"' to add it first"
         except Exception as e:
-            return f"Error executing command on remote node: {str(e)}"
+            return f"🔧 Tool: exec\n🌐 Node: {node}\n⚡ Cmd: {command}\n\n❌ Error: {str(e)}"
