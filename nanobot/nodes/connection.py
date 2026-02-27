@@ -20,203 +20,33 @@ from nanobot.nodes.config import NodeConfig
 logger = logging.getLogger(__name__)
 
 
-# The nanobot-node.py script that will be deployed to remote servers
-NODE_SCRIPT = """#!/usr/bin/env python3
-\"\"\"nanobot-node: Remote execution node for nanobot.
+def _get_node_script_path() -> Path:
+    """Get the path to the nanobot-node.py script."""
+    # Try multiple possible locations
+    possible_paths = [
+        # Development directory (relative to project root)
+        Path(__file__).parent.parent.parent.parent / "scripts" / "nanobot-node.py",
+        # Inside nanobot package (for installed packages)
+        Path(__file__).parent.parent / "scripts" / "nanobot-node.py",
+        # Current working directory / scripts
+        Path.cwd() / "scripts" / "nanobot-node.py",
+    ]
 
-This script runs on remote servers and provides command execution
-capabilities through WebSocket communication.
-\"\"\"
+    for path in possible_paths:
+        if path.exists():
+            return path
 
-import asyncio
-import json
-import subprocess
-import sys
-import signal
-
-try:
-    import websockets
-except ImportError:
-    print("Error: websockets package not found. Install with: pip install websockets")
-    sys.exit(1)
-
-SESSION_NAME = "nanobot"
-PORT = __PORT__
-AUTH_TOKEN = "__TOKEN__"
+    # Default fallback (may not exist)
+    return possible_paths[0]
 
 
-class TmuxSession:
-    \"\"\"Manage a tmux session for maintaining context.\"\"\"
-
-    def __init__(self, session_name: str = SESSION_NAME):
-        self.session_name = session_name
-        self.running = False
-
-    async def create(self):
-        \"\"\"Create a new tmux session.\"\"\"
-        if self.running:
-            return
-
-        # Check if session already exists
-        result = subprocess.run(
-            ["tmux", "has-session", "-t", self.session_name],
-            capture_output=True,
-        )
-        if result.returncode == 0:
-            # Session exists, kill it
-            self.kill()
-
-        # Create new session
-        subprocess.run(
-            ["tmux", "new-session", "-d", "-s", self.session_name],
-            check=True,
-        )
-        self.running = True
-
-    async def send(self, command: str) -> None:
-        \"\"\"Send command to tmux session.\"\"\"
-        cmd = f"tmux send-keys -t {self.session_name} '{command.replace(\"'\", \"'\\\\''\")}' Enter"
-        subprocess.run(cmd, shell=True, check=True)
-
-    async def capture(self) -> str:
-        \"\"\"Capture output from tmux session.\"\"\"
-        result = subprocess.run(
-            ["tmux", "capture-pane", "-t", self.session_name, "-p"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout
-
-    def kill(self):
-        \"\"\"Kill the tmux session.\"\"\"
-        subprocess.run(
-            ["tmux", "kill-session", "-t", self.session_name],
-            capture_output=True,
-        )
-        self.running = False
-
-
-class CommandExecutor:
-    \"\"\"Execute commands and return results.\"\"\"
-
-    def __init__(self):
-        self.tmux = TmuxSession()
-
-    async def execute(self, command: str) -> dict:
-        \"\"\"Execute a command and return the result.\"\"\"
-        try:
-            # Ensure tmux session exists
-            await self.tmux.create()
-
-            # Send command
-            await self.tmux.send(command)
-
-            # Wait for command to execute
-            await asyncio.sleep(0.5)
-
-            # Capture output
-            output = await self.tmux.capture()
-
-            return {
-                "success": True,
-                "output": output,
-                "error": None,
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "output": None,
-                "error": str(e),
-            }
-
-    def cleanup(self):
-        \"\"\"Clean up resources.\"\"\"
-        self.tmux.kill()
-
-
-async def handle_connection(websocket, path):
-    \"\"\"Handle WebSocket connection.\"\"\"
-    # Authentication
-    auth_message = await websocket.recv()
-    auth_data = json.loads(auth_message)
-
-    if AUTH_TOKEN and auth_data.get("token") != AUTH_TOKEN:
-        await websocket.send(json.dumps({
-            "type": "error",
-            "message": "Authentication failed"
-        }))
-        return
-
-    # Send success message
-    await websocket.send(json.dumps({
-        "type": "authenticated",
-        "message": "Connection established"
-    }))
-
-    executor = CommandExecutor()
-
-    try:
-        async for message in websocket:
-            data = json.loads(message)
-
-            if data.get("type") == "execute":
-                command = data.get("command")
-                if not command:
-                    await websocket.send(json.dumps({
-                        "type": "error",
-                        "message": "No command provided"
-                    }))
-                    continue
-
-                result = await executor.execute(command)
-                await websocket.send(json.dumps({
-                    "type": "result",
-                    "command": command,
-                    **result
-                }))
-
-            elif data.get("type") == "ping":
-                await websocket.send(json.dumps({"type": "pong"}))
-
-            elif data.get("type") == "close":
-                break
-
-    finally:
-        executor.cleanup()
-        logger.info("Connection closed")
-
-
-async def main():
-    \"\"\"Start the WebSocket server.\"\"\"
-    logger.info(f"Starting nanobot-node on port {PORT}")
-
-    # Set up signal handlers for graceful shutdown
-    loop = asyncio.get_event_loop()
-    stop_event = asyncio.Event()
-
-    def signal_handler():
-        stop_event.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, signal_handler)
-
-    # Start server
-    async with websockets.serve(handle_connection, "0.0.0.0", PORT):
-        await stop_event.wait()
-
-    logger.info("nanobot-node stopped")
-
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    logger = logging.getLogger(__name__)
-    asyncio.run(main())
-"""
-
+# Load the node script at module import
+_NODE_SCRIPT_PATH = _get_node_script_path()
+if _NODE_SCRIPT_PATH.exists():
+    _NODE_SCRIPT = _NODE_SCRIPT_PATH.read_text()
+else:
+    logger.warning(f"nanobot-node.py not found at {_NODE_SCRIPT_PATH}")
+    _NODE_SCRIPT = ""
 
 class RemoteNode:
     """
@@ -423,16 +253,15 @@ class RemoteNode:
 
     async def _deploy_node(self):
         """Deploy node script to remote server."""
-        # Generate node script with configuration
-        script = NODE_SCRIPT.replace("__PORT__", str(self.config.remote_port))
-        script = script.replace("__TOKEN__", self.config.auth_token or "")
+        if not _NODE_SCRIPT:
+            raise RuntimeError("nanobot-node.py script not found. Cannot deploy node.")
 
         # Create remote temporary directory
         remote_dir = f"/tmp/{self.session_id}"
         await self._ssh_exec(f"mkdir -p {remote_dir}")
 
         # Upload script (base64 encoded to avoid shell escaping issues)
-        encoded_script = base64.b64encode(script.encode()).decode()
+        encoded_script = base64.b64encode(_NODE_SCRIPT.encode()).decode()
         await self._ssh_exec(
             f"echo {encoded_script} | base64 -d > {remote_dir}/nanobot-node.py"
         )
@@ -441,9 +270,18 @@ class RemoteNode:
         """Start the node process on remote server."""
         remote_dir = f"/tmp/{self.session_id}"
 
-        # Start node process with uv
-        # Use nohup to keep it running after SSH disconnect
-        cmd = f"cd {remote_dir} && nohup uv run --with websockets nanobot-node.py > /dev/null 2>&1 &"
+        # Build command with configuration
+        args = [
+            f"cd {remote_dir}",
+            "nohup",
+            "uv", "run", "--with", "websockets", "nanobot-node.py",
+            f"--port", str(self.config.remote_port),
+        ]
+        if self.config.auth_token:
+            args.extend(["--token", f'"{self.config.auth_token}"'])
+
+        # Start node process
+        cmd = " ".join(args) + " > /dev/null 2>&1 &"
         await self._ssh_exec(cmd)
 
         # Wait for node to start
@@ -537,24 +375,3 @@ class RemoteNode:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            raise RuntimeError(f"SSH command failed: {stderr.decode()}")
-
-        return stdout.decode()
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.setup()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.teardown()
-
-    @property
-    def is_connected(self) -> bool:
-        """Check if node is connected."""
-        return self._running and self._authenticated
