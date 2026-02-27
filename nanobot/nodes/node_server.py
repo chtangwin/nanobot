@@ -5,9 +5,14 @@ This script runs on remote servers and provides command execution
 capabilities through WebSocket communication.
 
 Usage:
-    uv run --with websockets node_server.py [options]
+    # Direct execution with command line args
+    uv run --with websockets node_server.py --port 8765 --token secret
+
+    # Using config file (recommended for automated deployment)
+    uv run --with websockets node_server.py --config /path/to/config.json
 
 Options:
+    --config PATH         Path to JSON config file
     --port PORT           WebSocket port to listen on (default: 8765)
     --token TOKEN         Authentication token (optional)
     --no-tmux             Don't use tmux for session management
@@ -262,6 +267,11 @@ async def main():
     """Start the WebSocket server."""
     parser = argparse.ArgumentParser(description="nanobot remote node")
     parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to JSON config file (overrides other args)"
+    )
+    parser.add_argument(
         "--port",
         type=int,
         default=DEFAULT_PORT,
@@ -281,16 +291,46 @@ async def main():
 
     args = parser.parse_args()
 
+    # Load config file if specified
+    if args.config:
+        import json
+        from pathlib import Path
+
+        config_path = Path(args.config)
+        if not config_path.exists():
+            logger.error(f"Config file not found: {args.config}")
+            sys.exit(1)
+
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+
+            # Apply config (overrides command line args)
+            port = config.get("port", args.port)
+            token = config.get("token", args.token)
+            use_tmux = not config.get("no_tmux", args.no_tmux)
+
+            logger.info(f"Loaded config from: {args.config}")
+            logger.info(f"Config: port={port}, token={'***' if token else 'none'}, tmux={use_tmux}")
+
+        except Exception as e:
+            logger.error(f"Failed to load config file: {e}")
+            sys.exit(1)
+    else:
+        port = args.port
+        token = args.token
+        use_tmux = not args.no_tmux
+
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
-    logger.info(f"Starting node_server on port {args.port}")
-    if args.token:
+    logger.info(f"Starting node_server on port {port}")
+    if token:
         logger.info("Authentication token enabled")
-    if args.no_tmux:
+    if not use_tmux:
         logger.info("Running without tmux (no session persistence)")
     else:
         logger.info("Running with tmux (session persistence enabled)")
@@ -307,10 +347,10 @@ async def main():
         loop.add_signal_handler(sig, signal_handler)
 
     # Start server
-    handler = lambda ws, path: handle_connection(ws, path, args.token, not args.no_tmux)
+    handler = lambda ws, path: handle_connection(ws, path, token, use_tmux)
 
-    async with websockets.serve(handler, "0.0.0.0", args.port):
-        logger.info(f"Server listening on ws://0.0.0.0:{args.port}")
+    async with websockets.serve(handler, "0.0.0.0", port):
+        logger.info(f"Server listening on ws://0.0.0.0:{port}")
         await stop_event.wait()
 
     logger.info("node_server stopped")

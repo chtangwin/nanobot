@@ -268,26 +268,37 @@ class RemoteNode:
         )
         logger.info(f"Script uploaded successfully")
 
+        # Create config file
+        config = {
+            "port": self.config.remote_port,
+        }
+        if self.config.auth_token:
+            config["token"] = self.config.auth_token
+
+        import json
+        config_json = json.dumps(config, indent=2)
+        encoded_config = base64.b64encode(config_json.encode()).decode()
+
+        logger.info(f"Uploading config.json to {remote_dir}")
+        logger.info(f"Config: port={config['port']}, token={'***' if config.get('token') else 'none'}")
+        await self._ssh_exec(
+            f"echo {encoded_config} | base64 -d > {remote_dir}/config.json"
+        )
+        logger.info(f"Config uploaded successfully")
+
     async def _start_node(self):
         """Start the node process on remote server."""
         remote_dir = f"/tmp/{self.session_id}"
         log_file = f"{remote_dir}/node_server.log"
+        config_file = f"{remote_dir}/config.json"
 
-        # Build command with configuration
-        # Use && to chain commands properly
-        cmd_parts = [
-            f"cd {remote_dir}",
-            "nohup",
-            "uv", "run", "--with", "websockets", "node_server.py",
-            f"--port", str(self.config.remote_port),
-        ]
-        if self.config.auth_token:
-            cmd_parts.extend(["--token", self.config.auth_token])
+        # Build command using config file (more robust than string replacement)
+        cmd = f"cd {remote_dir} && nohup uv run --with websockets node_server.py --config {config_file} > {log_file} 2>&1 &"
 
-        # Chain commands with && and redirect output to log file
-        cmd = " && ".join(cmd_parts) + f" > {log_file} 2>&1 &"
-        logger.info(f"Starting node on remote: {cmd}")
-        logger.info(f"Remote log file: {log_file}")
+        logger.info(f"Starting node on remote with config file")
+        logger.info(f"Command: {cmd}")
+        logger.info(f"Remote log: {log_file}")
+        logger.info(f"Remote config: {config_file}")
 
         await self._ssh_exec(cmd)
 
