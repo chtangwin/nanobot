@@ -41,8 +41,8 @@ except ImportError:
     sys.exit(1)
 
 SESSION_NAME = "nanobot"
-PORT = {port}
-AUTH_TOKEN = "{token}"
+PORT = __PORT__
+AUTH_TOKEN = "__TOKEN__"
 
 
 class TmuxSession:
@@ -424,10 +424,8 @@ class RemoteNode:
     async def _deploy_node(self):
         """Deploy node script to remote server."""
         # Generate node script with configuration
-        script = NODE_SCRIPT.format(
-            port=self.config.remote_port,
-            token=self.config.auth_token or "",
-        )
+        script = NODE_SCRIPT.replace("__PORT__", str(self.config.remote_port))
+        script = script.replace("__TOKEN__", self.config.auth_token or "")
 
         # Create remote temporary directory
         remote_dir = f"/tmp/{self.session_id}"

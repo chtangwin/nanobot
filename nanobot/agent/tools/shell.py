@@ -133,12 +133,12 @@ class ExecTool(Tool):
                 output_parts.append(f"\nExit code: {process.returncode}")
             
             result = "\n".join(output_parts) if output_parts else "(no output)"
-            
-            # Truncate very long output
-            max_len = 10000
+
+            # Truncate very long output (increased limit for remote commands)
+            max_len = 50000
             if len(result) > max_len:
                 result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
-            
+
             return result
             
         except Exception as e:
