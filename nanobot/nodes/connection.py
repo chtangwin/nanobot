@@ -5,6 +5,7 @@ import uuid
 import json
 import base64
 import logging
+import subprocess
 from typing import Optional, Any
 from pathlib import Path
 
@@ -476,8 +477,6 @@ class RemoteNode:
 
     async def _ssh_exec(self, command: str) -> str:
         """Execute a command via SSH."""
-        import subprocess
-        
         ssh_cmd = [
             "ssh",
             "-p", str(self.config.ssh_port),
