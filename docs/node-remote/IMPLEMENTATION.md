@@ -183,7 +183,7 @@ _write_remote(path, content, node)
   └─ 返回结果
 ```
 
-### scripts/node_server.py
+### nanobot/nodes/node_server.py
 
 **用途**：部署到远程服务器
 
@@ -214,8 +214,28 @@ _write_remote(path, content, node)
 ```
 
 **用法**：
+
+1. **使用配置文件**（推荐）：
 ```bash
 # 在远程服务器上
+uv run --with websockets node_server.py --config config.json
+```
+
+配置文件格式 (`config.json`)：
+```json
+{
+  "port": 8765,
+  "token": "secret-token",
+  "tmux": true
+}
+```
+
+2. **使用命令行参数**：
+```bash
+# 基本启动
+uv run --with websockets node_server.py --port 8765
+
+# 带认证
 uv run --with websockets node_server.py --port 8765 --token secret
 
 # 不使用 tmux（无会话保持）
