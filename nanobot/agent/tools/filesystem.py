@@ -606,21 +606,21 @@ class CompareDirTool(Tool):
             "",
             "Only in right:",
             _render_items(only_right),
-            "",
-            "Type mismatch:",
-            _render_items(type_mismatch),
         ]
+
+        if type_mismatch:
+            lines += [
+                "",
+                "Type mismatch:",
+                _render_items(type_mismatch),
+            ]
 
         lines += [
             "",
             f"Different files ({'checksum' if compare_content else 'size/mtime'}):",
             _render_items(different_files),
-        ]
-
-        lines += [
             "",
             self._render_ignore_block(left_scan, right_scan, ignore_cfg),
-            "Note: Run compare_file on selected paths for detailed file-level diff/checksum.",
         ]
         return "\n".join(lines)
 
