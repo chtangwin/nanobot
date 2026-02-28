@@ -65,9 +65,6 @@ class AgentLoop:
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
-        block_sensitive_files: bool = True,
-        redact_tool_outputs: bool = True,
-        redact_context: bool = True,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
@@ -87,14 +84,11 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
-        self.block_sensitive_files = block_sensitive_files
-        self.redact_tool_outputs = redact_tool_outputs
-        self.redact_context = redact_context
 
         self.context = ContextBuilder(
             workspace,
-            redact_tool_outputs=self.redact_tool_outputs,
-            redact_context=self.redact_context,
+            
+            
         )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -108,7 +102,7 @@ class AgentLoop:
             local_backend=LocalExecutionBackend(
                 workspace=self.workspace,
                 allowed_dir=allowed_dir,
-                block_sensitive_files=self.block_sensitive_files,
+                
                 path_append=self.exec_config.path_append,
             ),
             host_manager=self.host_manager,
@@ -125,7 +119,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
-            block_sensitive_files=self.block_sensitive_files,
+            
         )
 
         self._running = False
