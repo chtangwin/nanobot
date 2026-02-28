@@ -179,9 +179,21 @@ class CompareDirTool(Tool):
     name = "compare_dir"
     description = (
         "Compare two directories at a high level across local/remote endpoints "
-        "(local↔remote or remote↔remote). Returns summary only (added/removed/changed counts), "
-        "not file-level text diff. At least one side must be remote. "
-        "Natural mapping: 'ignore xxx' -> ignore_globs, 'checksum/content compare' -> compare_content=true."
+        "(local↔remote or remote↔remote).\n"
+        "Use this tool when the user asks to:\n"
+        "- compare two folders\n"
+        "- check deployment consistency\n"
+        "- find added/removed/changed files\n"
+        "- get a summary first, then inspect selected files in detail\n"
+        "This tool returns summary only (not file-level text diff).\n"
+        "At least one side must be remote. For local↔local, use local diff tooling via exec.\n"
+        "Natural language mapping hints:\n"
+        "- '忽略 .git、node_modules、日志文件' -> ignore_globs\n"
+        "- '只看结构，不算内容' -> compare_content=false\n"
+        "- '校验内容是否一致' / '按校验和比对' -> compare_content=true\n"
+        "- '递归比较整个目录' -> recursive=true\n"
+        "- '只看一层目录' -> recursive=false\n"
+        "- '目录太大先给我摘要' -> max_entries (entry cap; over-limit returns summary)"
     )
     parameters = {
         "type": "object",
