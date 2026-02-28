@@ -242,48 +242,40 @@ class CompareFileTool(Tool):
         host: str | None = None,
         **kwargs: Any,
     ) -> str:
-        # Backward compatibility mapping: compare(local_path, remote_path, host)
-        if local_path or remote_path or host:
-            left_path = left_path or local_path
-            left_host = left_host or None
-            right_path = right_path or remote_path
-            right_host = right_host or host
+        left_path, left_host, right_path, right_host = self._normalize_paths(
+            left_path=left_path,
+            left_host=left_host,
+            right_path=right_path,
+            right_host=right_host,
+            local_path=local_path,
+            remote_path=remote_path,
+            host=host,
+        )
 
         if not left_path or not right_path:
             return "Error: 'left_path' and 'right_path' are required"
 
-        try:
-            left_backend = await self.backend_router.resolve(left_host)
-            right_backend = await self.backend_router.resolve(right_host)
-        except KeyError as e:
-            return f"Error: Host not found: {e}"
-        except Exception as e:
-            return f"Error preparing compare backends: {e}"
+        local_local_error = self._validate_endpoint_semantics(left_host, right_host)
+        if local_local_error:
+            return local_local_error
 
-        # Intentionally require at least one remote side to avoid surprising
-        # local<->local semantics mismatch with users' day-to-day tooling.
-        if not left_host and not right_host:
-            return (
-                "Error: local<->local compare is not supported in compare_file. "
-                "Use your local diff tooling via exec (e.g., git diff --no-index / diff -u)."
-            )
+        backends_or_error = await self._resolve_backends(left_host, right_host)
+        if isinstance(backends_or_error, str):
+            return backends_or_error
+        left_backend, right_backend = backends_or_error
 
-        left_bytes_res = await left_backend.read_bytes(left_path)
-        if not left_bytes_res.get("success"):
-            side = self._fmt_side(left_host, left_path)
-            return f"Error reading {side}: {left_bytes_res.get('error')}"
+        left_bytes_or_error = await self._read_side_bytes(left_backend, left_host, left_path)
+        if isinstance(left_bytes_or_error, str):
+            return left_bytes_or_error
 
-        right_bytes_res = await right_backend.read_bytes(right_path)
-        if not right_bytes_res.get("success"):
-            side = self._fmt_side(right_host, right_path)
-            return f"Error reading {side}: {right_bytes_res.get('error')}"
+        right_bytes_or_error = await self._read_side_bytes(right_backend, right_host, right_path)
+        if isinstance(right_bytes_or_error, str):
+            return right_bytes_or_error
 
-        left_bytes = left_bytes_res.get("content") or b""
-        right_bytes = right_bytes_res.get("content") or b""
+        left_bytes = left_bytes_or_error
+        right_bytes = right_bytes_or_error
 
-        if mode == "auto":
-            mode = "binary" if (self._is_binary(left_bytes) or self._is_binary(right_bytes)) else "text"
-
+        mode = self._resolve_mode(mode, left_bytes, right_bytes)
         if mode == "binary":
             return self._compare_binary(left_host, left_path, left_bytes, right_host, right_path, right_bytes)
 
@@ -299,6 +291,58 @@ class CompareFileTool(Tool):
             context_lines=context_lines,
             max_diff_lines=max_diff_lines,
         )
+
+    @staticmethod
+    def _normalize_paths(
+        *,
+        left_path: str | None,
+        left_host: str | None,
+        right_path: str | None,
+        right_host: str | None,
+        local_path: str | None,
+        remote_path: str | None,
+        host: str | None,
+    ) -> tuple[str | None, str | None, str | None, str | None]:
+        # Backward compatibility mapping: compare(local_path, remote_path, host)
+        if local_path or remote_path or host:
+            left_path = left_path or local_path
+            left_host = left_host or None
+            right_path = right_path or remote_path
+            right_host = right_host or host
+        return left_path, left_host, right_path, right_host
+
+    @staticmethod
+    def _validate_endpoint_semantics(left_host: str | None, right_host: str | None) -> str | None:
+        # Intentionally require at least one remote side to avoid surprising
+        # local<->local semantics mismatch with users' day-to-day tooling.
+        if not left_host and not right_host:
+            return (
+                "Error: local<->local compare is not supported in compare_file. "
+                "Use your local diff tooling via exec (e.g., git diff --no-index / diff -u)."
+            )
+        return None
+
+    async def _resolve_backends(self, left_host: str | None, right_host: str | None):
+        try:
+            left_backend = await self.backend_router.resolve(left_host)
+            right_backend = await self.backend_router.resolve(right_host)
+            return left_backend, right_backend
+        except KeyError as e:
+            return f"Error: Host not found: {e}"
+        except Exception as e:
+            return f"Error preparing compare backends: {e}"
+
+    async def _read_side_bytes(self, backend: Any, host: str | None, path: str) -> bytes | str:
+        result = await backend.read_bytes(path)
+        if not result.get("success"):
+            side = self._fmt_side(host, path)
+            return f"Error reading {side}: {result.get('error')}"
+        return result.get("content") or b""
+
+    def _resolve_mode(self, mode: str, left_bytes: bytes, right_bytes: bytes) -> str:
+        if mode == "auto":
+            return "binary" if (self._is_binary(left_bytes) or self._is_binary(right_bytes)) else "text"
+        return mode
 
     @staticmethod
     def _fmt_side(host: str | None, path: str) -> str:

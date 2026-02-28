@@ -185,6 +185,24 @@ async def test_rpc_returns_timeout_error():
     assert "timed out" in result["error"]
 
 
+@pytest.mark.asyncio
+async def test_read_bytes_invalid_base64_returns_structured_error():
+    cfg = HostConfig(name="h1", ssh_host="u@host")
+    host = RemoteHost(cfg)
+    host.session_id = "nanobot-existing"
+    host._running = True
+    host._authenticated = True
+    host.websocket = StubClientWebSocket(
+        responses=[json.dumps({"type": "result", "success": True, "content_b64": "!!!not-base64!!!"})]
+    )
+
+    result = await host.read_bytes("/tmp/a.bin", timeout=1.0)
+
+    assert result["success"] is False
+    assert "Invalid base64 payload" in (result.get("error") or "")
+    assert result["content"] is None
+
+
 # =========================
 # Server-side (remote_server)
 # =========================

@@ -290,13 +290,32 @@ class RemoteHost:
 
     async def read_bytes(self, path: str, timeout: float = 30.0) -> dict:
         result = await self._rpc({"type": "read_bytes", "path": path}, timeout=timeout)
+        if not result.get("success", False):
+            return {
+                "success": False,
+                "content": None,
+                "size": result.get("size"),
+                "error": result.get("error") or "Failed to read bytes",
+            }
+
         data_b64 = result.get("content_b64")
         content = None
         if data_b64:
             import base64
-            content = base64.b64decode(data_b64)
+            import binascii
+
+            try:
+                content = base64.b64decode(data_b64, validate=True)
+            except (binascii.Error, ValueError) as e:
+                return {
+                    "success": False,
+                    "content": None,
+                    "size": None,
+                    "error": f"Invalid base64 payload from remote read_bytes: {e}",
+                }
+
         return {
-            "success": result.get("success", False),
+            "success": True,
             "content": content,
             "size": result.get("size"),
             "error": result.get("error"),
