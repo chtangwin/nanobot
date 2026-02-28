@@ -1,4 +1,4 @@
-# 远程节点开发工作流
+# 远程主机开发工作流
 
 > 双分支开发策略说明
 
@@ -27,7 +27,7 @@
 
 **示例提交：**
 ```
-feat: 添加节点健康检查
+feat: 添加主机健康检查
 fix: 修复 SSH 隧道超时问题
 docs: 更新使用指南
 refactor: 重构连接管理器
@@ -56,12 +56,12 @@ refactor: 重构连接管理器
 git checkout feature/remote-node-local
 
 # 进行开发（代码或文档）
-vim nanobot/nodes/manager.py
+vim nanobot/remote/manager.py
 vim docs/node-remote/USAGE.md
 
 # 提交变更
 git add .
-git commit -m "feat: 添加节点健康检查功能"
+git commit -m "feat: 添加主机健康检查功能"
 ```
 
 ### 2. 同步到 PR 分支
@@ -142,9 +142,9 @@ docs: 翻译文档
 git checkout feature/remote-node-local
 
 # 2. 编写代码
-vim nanobot/nodes/health.py
-git add nanobot/nodes/health.py
-git commit -m "feat: 添加节点健康检查"
+vim nanobot/remote/health.py
+git add nanobot/remote/health.py
+git commit -m "feat: 添加主机健康检查"
 
 # 3. 更新文档
 vim docs/node-remote/USAGE.md
@@ -153,7 +153,7 @@ git commit -m "docs: 添加健康检查使用说明"
 
 # 4. 同步到 PR 分支
 ./scripts/sync-to-pr-branch.sh
-# 只会 cherry-pick "feat: 添加节点健康检查"
+# 只会 cherry-pick "feat: 添加主机健康检查"
 
 # 5. 推送并创建 PR
 git push origin feature/remote-node
@@ -166,7 +166,7 @@ git push origin feature/remote-node
 git checkout feature/remote-node-local
 
 # 修复代码
-vim nanobot/nodes/connection.py
+vim nanobot/remote/connection.py
 git commit -am "fix: 修复连接超时处理"
 
 # 同步到 PR 分支

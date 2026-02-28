@@ -1,6 +1,6 @@
-# 远程节点调试指南
+# 远程主机调试指南
 
-本文档说明如何调试远程节点功能。
+本文档说明如何调试远程主机功能。
 
 ## 目录结构
 
@@ -8,9 +8,9 @@
 
 ```
 /tmp/nanobot-xxx/
-├── node_server.py    # WebSocket 服务器脚本
+├── remote_server.py    # WebSocket 服务器脚本
 ├── config.json        # 配置文件
-└── node_server.log    # 运行日志
+└── remote_server.log    # 运行日志
 ```
 
 `xxx` 是唯一的会话 ID（8位十六进制，例如：`a3f2b1c4`）。
@@ -52,19 +52,19 @@ cat /tmp/nanobot-xxx/config.json
 
 ### 位置
 
-`/tmp/nanobot-xxx/node_server.log`
+`/tmp/nanobot-xxx/remote_server.log`
 
 ### 查看日志
 
 ```bash
 # 查看最后 50 行
-tail -50 /tmp/nanobot-xxx/node_server.log
+tail -50 /tmp/nanobot-xxx/remote_server.log
 
 # 实时监控日志
-tail -f /tmp/nanobot-xxx/node_server.log
+tail -f /tmp/nanobot-xxx/remote_server.log
 
 # 查看完整日志
-cat /tmp/nanobot-xxx/node_server.log
+cat /tmp/nanobot-xxx/remote_server.log
 ```
 
 ### 日志级别
@@ -86,7 +86,7 @@ pgrep -a uv
 
 预期输出：
 ```
-12345 uv run --with websockets node_server.py --config config.json
+12345 uv run --with websockets remote_server.py --config config.json
 ```
 
 ### 检查 Python 进程
@@ -97,7 +97,7 @@ pgrep -a python
 
 预期输出：
 ```
-12346 python node_server.py --config config.json
+12346 python remote_server.py --config config.json
 ```
 
 ### 检查 tmux 会话
@@ -122,7 +122,7 @@ scp root@10.0.0.174:/tmp/nanobot-xxx/config.json .
 ### 2. 本地测试
 
 ```bash
-uv run --with websockets nanobot/nodes/node_server.py --config config.json
+uv run --with websockets nanobot/remote/remote_server.py --config config.json
 ```
 
 ### 3. 测试连接
@@ -169,7 +169,7 @@ Error: WebSocket connection failed
 
 2. 查看远程日志：
    ```bash
-   ssh root@10.0.0.174 "tail -50 /tmp/nanobot-*/node_server.log"
+   ssh root@10.0.0.174 "tail -50 /tmp/nanobot-*/remote_server.log"
    ```
 
 3. 检查端口占用：
@@ -214,7 +214,7 @@ Error: [Errno 98] Address already in use
 ssh root@10.0.0.174 "lsof -i :8765"
 
 # 或使用不同端口
-# 修改节点配置中的 remote_port
+# 修改主机配置中的 remote_port
 ```
 
 ## 命令执行调试
@@ -236,14 +236,14 @@ total 50
 **远程执行**（正确）：
 ```
 🔧 Tool: exec
-🌐 Node: myserver
+🌐 Host: myserver
 📁 CWD: (default)
 ⚡ Cmd: pwd
 
 /root
 ```
 
-**远程执行**（错误，绕过了 NodeManager）：
+**远程执行**（错误，绕过了 HostManager）：
 ```
 🔧 Tool: exec
 📁 CWD: /home/user
@@ -256,8 +256,8 @@ total 50
 
 | 看到 | 含义 |
 |------|------|
-| `🌐 Node: xxx` | ✓ LLM 正确使用 node 参数 |
-| 命令中有 `ssh` | ✗ LLM 绕过了 NodeManager |
+| `🌐 Host: xxx` | ✓ LLM 正确使用 host 参数 |
+| 命令中有 `ssh` | ✗ LLM 绕过了 HostManager |
 | `📁 CWD: /root` | 远程执行 |
 | `📁 CWD: C:\Users\...` | 本地执行 |
 
@@ -265,7 +265,7 @@ total 50
 
 ### 修改日志级别
 
-如果需要更详细的日志，可以修改 node_server.py：
+如果需要更详细的日志，可以修改 remote_server.py：
 
 ```python
 logging.basicConfig(
@@ -283,11 +283,11 @@ logging.basicConfig(
   "token": "secret",
   "tmux": true,
   "log_level": "DEBUG",
-  "log_file": "/var/log/nanobot-node.log"
+  "log_file": "/var/log/nanobot-remote.log"
 }
 ```
 
-注意：此功能需要修改 node_server.py 支持。
+注意：此功能需要修改 remote_server.py 支持。
 
 ## 性能分析
 
@@ -346,7 +346,7 @@ ssh root@10.0.0.174 "find /tmp/nanobot-* -mtime +7 -exec rm -rf {} \;"
 1. 收集信息：
    - 本地命令：执行的是什么
    - 错误消息：完整的错误输出
-   - 远程日志：`/tmp/nanobot-xxx/node_server.log`
+   - 远程日志：`/tmp/nanobot-xxx/remote_server.log`
    - 配置文件：`/tmp/nanobot-xxx/config.json`
 
 2. 提交 Issue：

@@ -1,4 +1,4 @@
-# 远程节点使用指南
+# 远程主机使用指南
 
 > 在远程服务器上执行命令，就像在本地一样
 
@@ -34,15 +34,15 @@
 
 ### 三步上手
 
-**步骤 1：添加节点**
+**步骤 1：添加主机**
 
 ```
-你："添加一个名为 'myserver' 的节点，地址是 root@10.0.0.174"
+你："添加一个名为 'myserver' 的主机，地址是 root@10.0.0.174"
 
 nanobot 调用：
 hosts action="add" name="myserver" ssh_host="root@10.0.0.174"
 
-响应：✓ 节点 'myserver' 添加成功
+响应：✓ 主机 'myserver' 添加成功
 ```
 
 **步骤 2：连接**
@@ -66,7 +66,7 @@ exec command="pwd" host="myserver"
 
 响应：
 🔧 Tool: exec
-🌐 Node: myserver
+🌐 Host: myserver
 📁 CWD: (default)
 ⚡ Cmd: pwd
 
@@ -79,7 +79,7 @@ exec command="pwd" host="myserver"
 
 ## SSH 配置指南
 
-在添加远程节点之前，建议先配置 SSH 密钥认证，避免每次连接都输入密码。
+在添加远程主机之前，建议先配置 SSH 密钥认证，避免每次连接都输入密码。
 
 ### 步骤 1：检查或生成 SSH 密钥
 
@@ -232,21 +232,21 @@ C:\Users\YourName\.ssh\id_rsa
 
 ## 核心操作
 
-### nodes 工具
+### hosts 工具
 
 | 操作 | 说明 | 参数 |
 |------|------|------|
-| `list` | 列出所有节点 | - |
-| `add` | 添加新节点 | `name`, `ssh_host` |
-| `remove` | 移除节点 | `name` |
-| `connect` | 连接到节点 | `name` |
-| `disconnect` | 断开节点 | `name` |
-| `status` | 查看节点状态 | `name` |
+| `list` | 列出所有主机 | - |
+| `add` | 添加新主机 | `name`, `ssh_host` |
+| `remove` | 移除主机 | `name` |
+| `connect` | 连接到主机 | `name` |
+| `disconnect` | 断开主机 | `name` |
+| `status` | 查看主机状态 | `name` |
 | `exec` | 执行命令（已废弃，用 exec 工具） | - |
 
 ### 支持远程的工具
 
-这些工具支持 `node` 参数：
+这些工具支持 `host` 参数：
 
 **exec** - 执行命令
 ```
@@ -385,7 +385,7 @@ tmux 会保持你的工作目录和上下文：
 → [仍在 /app 目录中]
 ```
 
-### 示例 5：多节点管理
+### 示例 5：多主机管理
 
 **在所有服务器上运行命令**
 ```
@@ -447,13 +447,13 @@ exec command="chmod +x /app/deploy.sh" host="myserver"
 
 ## 配置详解
 
-### 节点配置文件
+### 主机配置文件
 
-配置存储在 `~/.nanobot/nodes.json`：
+配置存储在 `~/.nanobot/hosts.json`：
 
 ```json
 {
-  "nodes": {
+  "hosts": {
     "myserver": {
       "name": "myserver",
       "ssh_host": "root@10.0.0.174",
@@ -475,7 +475,7 @@ exec command="chmod +x /app/deploy.sh" host="myserver"
 }
 ```
 
-### 添加节点时的选项
+### 添加主机时的选项
 
 **基本配置**
 ```
@@ -517,10 +517,10 @@ hosts action="add" \
 本地                          远程
 ────────────────────────────────────────
 nanobot agent                /tmp/nanobot-xxx/
-  ├─ NodeManager             ├─ node_server.py
-  ├─ RemoteNode              ├─ deploy.sh
+  ├─ HostManager             ├─ remote_server.py
+  ├─ RemoteHost              ├─ deploy.sh
   └─ SSH 隧道                ├─ server.pid
-      ↓                      ├─ node_server.log
+      ↓                      ├─ remote_server.log
 WebSocket ← SSH tunnel →    ├─ tmux.sock
   ↓                          └─ tmux session "nanobot"
 execute command
@@ -531,13 +531,13 @@ execute command
 ```
 1. 用户："连接到 myserver"
 2. nanobot：创建 SSH 隧道（localhost:XXXX → remote:8765）
-3. nanobot：在本地准备 staging 目录（node_server.py + deploy.sh）
+3. nanobot：在本地准备 staging 目录（remote_server.py + deploy.sh）
 4. nanobot：scp -r 一次性上传所有文件到 /tmp/nanobot-xxx/
 5. nanobot：ssh 执行 deploy.sh --port 8765 [--token ...]
    deploy.sh：
      a. 检查/安装 uv（自动 curl 下载）
      b. 清理旧进程
-     c. 启动 node_server.py（setsid + disown 后台运行）
+     c. 启动 remote_server.py（setsid + disown 后台运行）
      d. 轮询等待端口就绪（最多 60s）
 6. nanobot：通过隧道连接 WebSocket
 7. nanobot：认证
@@ -722,7 +722,7 @@ Permission denied (publickey)
 # 检查密钥
 ssh -i ~/.ssh/id_rsa root@10.0.0.174
 
-# 或在添加节点时指定密钥
+# 或在添加主机时指定密钥
 hosts action="add" name="myserver" ssh_host="root@host" ssh_key_path="~/.ssh/id_rsa"
 ```
 
@@ -753,7 +753,7 @@ ssh root@10.0.0.174
 ls -la /tmp/nanobot-*/
 
 # 3. 查看日志
-cat /tmp/nanobot-xxx/node_server.log
+cat /tmp/nanobot-xxx/remote_server.log
 
 # 4. 查看进程 PID
 cat /tmp/nanobot-xxx/server.pid
@@ -768,14 +768,14 @@ ps -p $(cat /tmp/nanobot-xxx/server.pid)
 
 ## 最佳实践
 
-### 1. 使用描述性的节点名称
+### 1. 使用描述性的主机名称
 
-✅ **好**：`prod-server`, `build-node`, `staging-db`
+✅ **好**：`prod-server`, `build-host`, `staging-db`
 ❌ **差**：`server1`, `host2`, `test`
 
 ### 2. 设置工作区
 
-为每个节点配置默认工作目录：
+为每个主机配置默认工作目录：
 ```
 hosts action="add" name="build-server" ssh_host="user@host" workspace="/app"
 ```
@@ -849,7 +849,7 @@ exec command="nohup command > /tmp/task.log 2>&1 &" host="myserver"
 ## 安全考虑
 
 1. **SSH 密钥**：使用密钥而不是密码
-2. **认证令牌**：为敏感节点设置唯一令牌
+2. **认证令牌**：为敏感主机设置唯一令牌
 3. **文件权限**：远程脚本使用 /tmp（用户级）
 4. **命令守卫**：本地工具仍然阻止危险命令
 5. **清理**：断开时自动删除所有临时文件
@@ -869,6 +869,6 @@ exec command="nohup command > /tmp/task.log 2>&1 &" host="myserver"
 如果遇到问题：
 
 1. 查看 [DEBUGGING.md](./DEBUGGING.md)
-2. 检查远程日志：`/tmp/nanobot-xxx/node_server.log`
+2. 检查远程日志：`/tmp/nanobot-xxx/remote_server.log`
 3. 确认 SSH 连接：`ssh user@host`
 4. 提交 Issue（附带日志和配置）
