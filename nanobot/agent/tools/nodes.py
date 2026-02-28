@@ -1,4 +1,4 @@
-"""Nodes tool for managing and executing commands on remote nodes."""
+"""Host management tools for managing and executing commands on remote hosts."""
 
 import logging
 from typing import Any, Optional
@@ -12,21 +12,21 @@ logger = logging.getLogger(__name__)
 
 class NodesTool(Tool):
     """
-    Tool for managing remote nodes and executing commands on them.
+    Tool for managing remote hosts and executing commands on them.
 
     Supports:
-    - Adding/removing nodes
-    - Connecting/disconnecting from nodes
-    - Listing nodes and their status
-    - Executing commands on remote nodes
+    - Adding/removing hosts
+    - Connecting/disconnecting from hosts
+    - Listing hosts and their status
+    - Executing commands on remote hosts
     """
 
     def __init__(self, config_path: Optional[str] = None, node_manager: Optional[NodeManager] = None):
         """
-        Initialize the nodes tool.
+        Initialize the hosts tool.
 
         Args:
-            config_path: Optional path to nodes configuration file.
+            config_path: Optional path to hosts configuration file.
                         If not specified, uses default path.
             node_manager: Optional shared NodeManager instance.
                          If provided, uses this instead of creating a new one.
@@ -42,25 +42,25 @@ class NodesTool(Tool):
 
     @property
     def name(self) -> str:
-        return "nodes"
+        return "hosts"
 
     @property
     def description(self) -> str:
-        return """Manage and execute commands on remote nodes.
+        return """Manage and execute commands on remote hosts.
 
 Actions:
-- list: List all configured nodes and their status
-- add: Add a new node (requires: name, ssh_host)
-- remove: Remove a node (requires: name)
-- connect: Connect to a node (requires: name)
-- disconnect: Disconnect from a node (requires: name)
-- status: Get status of a node (requires: name)
-- exec: Execute a command on a node (requires: name, command)
+- list: List all configured hosts and their status
+- add: Add a new host (requires: name, ssh_host)
+- remove: Remove a host (requires: name)
+- connect: Connect to a host (requires: name)
+- disconnect: Disconnect from a host (requires: name)
+- status: Get status of a host (requires: name)
+- exec: Execute a command on a host (requires: name, command)
 
 Examples:
-- nodes action="list"
-- nodes action="add" name="build-server" ssh_host="user@192.168.1.100"
-- nodes action="exec" name="build-server" command="ls -la"
+- hosts action="list"
+- hosts action="add" name="build-server" ssh_host="user@192.168.1.100"
+- hosts action="exec" name="build-server" command="ls -la"
 """
 
     @property
@@ -75,7 +75,7 @@ Examples:
                 },
                 "name": {
                     "type": "string",
-                    "description": "Node name (for add/remove/connect/disconnect/status/exec)"
+                    "description": "Host name (for add/remove/connect/disconnect/status/exec)"
                 },
                 "ssh_host": {
                     "type": "string",
@@ -107,7 +107,7 @@ Examples:
 
     async def execute(self, **kwargs: Any) -> str:
         """
-        Execute the nodes tool.
+        Execute the hosts tool.
 
         Args:
             **kwargs: Tool parameters.
@@ -155,17 +155,17 @@ Examples:
                 return f"Error: Unknown action '{action}'"
 
         except Exception as e:
-            logger.exception(f"Error executing nodes tool action: {action}")
+            logger.exception(f"Error executing hosts tool action: {action}")
             return f"Error: {str(e)}"
 
     async def _list_nodes(self) -> str:
-        """List all configured nodes."""
+        """List all configured hosts."""
         nodes = self.manager.list_nodes()
 
         if not nodes:
-            return "No nodes configured. Use 'nodes action=\"add\"' to add a node."
+            return "No hosts configured. Use 'hosts action=\"add\"' to add a host."
 
-        lines = ["Configured nodes:"]
+        lines = ["Configured hosts:"]
         for node in nodes:
             status = "✓ connected" if node["connected"] else "○ disconnected"
             lines.append(f"\n  {node['name']}: {node['ssh_host']} [{status}]")
@@ -182,7 +182,7 @@ Examples:
         ssh_key_path: Optional[str] = None,
         workspace: Optional[str] = None,
     ) -> str:
-        """Add a new node."""
+        """Add a new host."""
         if not name:
             return "Error: 'name' parameter is required for add action"
 
@@ -199,21 +199,21 @@ Examples:
 
         config = await self.manager.add_node(name, ssh_host, **kwargs)
 
-        return f"✓ Node '{name}' added successfully\n  ssh_host: {config.ssh_host}\n  Use 'nodes action=\"connect\" name=\"{name}\"' to connect"
+        return f"✓ Host '{name}' added successfully\n  ssh_host: {config.ssh_host}\n  Use 'hosts action=\"connect\" name=\"{name}\"' to connect"
 
     async def _remove_node(self, name: str) -> str:
-        """Remove a node."""
+        """Remove a host."""
         if not name:
             return "Error: 'name' parameter is required for remove action"
 
         if self.manager.config.get_node(name) is None:
-            return f"Error: Node '{name}' not found"
+            return f"Error: Host '{name}' not found"
 
         await self.manager.remove_node(name)
-        return f"✓ Node '{name}' removed successfully"
+        return f"✓ Host '{name}' removed successfully"
 
     async def _connect_node(self, name: str) -> str:
-        """Connect to a node."""
+        """Connect to a host."""
         if not name:
             return "Error: 'name' parameter is required for connect action"
 
@@ -221,36 +221,36 @@ Examples:
             node = await self.manager.connect(name)
             return f"✓ Connected to '{name}' (session: {node.session_id})"
         except KeyError:
-            return f"Error: Node '{name}' not found. Use 'nodes action=\"add\"' first"
+            return f"Error: Host '{name}' not found. Use 'hosts action=\"add\"' first"
         except Exception as e:
             return f"Error: Failed to connect to '{name}': {str(e)}"
 
     async def _disconnect_node(self, name: str) -> str:
-        """Disconnect from a node."""
+        """Disconnect from a host."""
         if not name:
             return "Error: 'name' parameter is required for disconnect action"
 
         disconnected = await self.manager.disconnect(name)
 
         if not disconnected:
-            return f"Node '{name}' is not connected"
+            return f"Host '{name}' is not connected"
 
         return f"✓ Disconnected from '{name}'"
 
     async def _node_status(self, name: str) -> str:
-        """Get node status."""
+        """Get host status."""
         if not name:
             return "Error: 'name' parameter is required for status action"
 
         config = self.manager.config.get_node(name)
         if not config:
-            return f"Error: Node '{name}' not found"
+            return f"Error: Host '{name}' not found"
 
         node = self.manager.get_node(name)
         is_connected = node.is_connected if node else False
 
         lines = [
-            f"Node: {name}",
+            f"Host: {name}",
             f"  ssh_host: {config.ssh_host}",
             f"  ssh_port: {config.ssh_port}",
             f"  status: {'Connected' if is_connected else 'Disconnected'}",
@@ -270,7 +270,7 @@ Examples:
         command: str,
         timeout: float = 30.0,
     ) -> str:
-        """Execute a command on a node."""
+        """Execute a command on a host."""
         if not name:
             return "Error: 'name' parameter is required for exec action"
 
@@ -289,6 +289,21 @@ Examples:
                 return f"✗ Command failed on '{name}':\n\n{error}"
 
         except KeyError:
-            return f"Error: Node '{name}' not found"
+            return f"Error: Host '{name}' not found"
         except Exception as e:
             return f"Error: Failed to execute command on '{name}': {str(e)}"
+
+
+class LegacyNodesTool(NodesTool):
+    """Backward-compatible alias: `nodes` -> `hosts`."""
+
+    @property
+    def name(self) -> str:
+        return "nodes"
+
+    @property
+    def description(self) -> str:
+        return (
+            "[Deprecated alias] Use `hosts` instead. "
+            "This tool manages remote hosts and executes commands on them."
+        )
