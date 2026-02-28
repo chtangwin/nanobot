@@ -36,7 +36,7 @@ Actions:
 - add: Add a new host (requires: name, ssh_host)
 - remove: Remove a host (requires: name)
 - connect: Connect to a host (requires: name)
-- disconnect: Disconnect from a host (requires: name)
+- disconnect: ⚠️ TEARDOWN: kills remote_server, tmux session, and deletes /tmp/nanobot-* — use only when completely done (requires: name)
 - status: Get status of a host (requires: name)
 - exec: Execute a command on a host (requires: name, command)
 
