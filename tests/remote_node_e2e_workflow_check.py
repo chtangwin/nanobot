@@ -92,8 +92,60 @@ async def test():
     except Exception as e:
         print(f"  ⚠️  Could not check remote state: {e}")
 
-    # ── 4. Get remote log ────────────────────────────────────
-    section(4, "remote server log (last 10 lines)")
+    # ── 4. Auto-heal transport (no implicit new session) ─────
+    section(4, "auto-heal on transport drop (same session, no redeploy)")
+    try:
+        before_session = host.session_id
+        # Simulate network/transport loss on local side only
+        await host._mark_transport_down()
+
+        result = await host.execute("pwd", timeout=20.0)
+        ok = result.get("success", False)
+        same_session = host.session_id == before_session
+        print(f"  {'✅' if ok else '❌'} auto-reconnect execute: {result.get('output', '').strip()}")
+        print(f"  {'✅' if same_session else '❌'} session unchanged: {before_session} -> {host.session_id}")
+        if not ok:
+            errors.append(f"auto-heal execute failed: {result.get('error')}")
+        if not same_session:
+            errors.append("auto-heal changed session unexpectedly")
+    except Exception as e:
+        print(f"  ❌ auto-heal test failed: {e}")
+        errors.append(f"auto-heal test failed: {e}")
+
+    # ── 5. Idempotency (request_id de-dup) ───────────────────
+    section(5, "idempotency: retry same request_id should not re-execute")
+    try:
+        counter_file = f"/tmp/{session_id}/idem_counter.txt"
+        req_id = "idem-e2e-001"
+        command = (
+            f"v=$(cat {counter_file} 2>/dev/null || echo 0); "
+            f"v=$((v+1)); echo $v > {counter_file}; cat {counter_file}"
+        )
+
+        first = await host._rpc({"type": "exec", "command": command, "request_id": req_id}, timeout=20.0)
+        # Simulate transport loss before retrying the SAME request_id
+        await host._mark_transport_down()
+        second = await host._rpc({"type": "exec", "command": command, "request_id": req_id}, timeout=20.0)
+        verify = await host.execute(f"cat {counter_file}", timeout=10.0)
+
+        out1 = (first.get("output") or "").strip()
+        out2 = (second.get("output") or "").strip()
+        outv = (verify.get("output") or "").strip()
+
+        print(f"  first result  = {out1}")
+        print(f"  retry result  = {out2}")
+        print(f"  counter final = {outv}")
+
+        idempotent = (out1 == out2 == "1") and (outv == "1")
+        print(f"  {'✅' if idempotent else '❌'} de-dup effective")
+        if not idempotent:
+            errors.append("idempotency failed: same request_id appears re-executed")
+    except Exception as e:
+        print(f"  ❌ idempotency test failed: {e}")
+        errors.append(f"idempotency test failed: {e}")
+
+    # ── 6. Get remote log ────────────────────────────────────
+    section(6, "remote server log (last 10 lines)")
     try:
         log = await host._get_remote_log(tail_lines=10)
         for line in log.strip().split("\n"):
@@ -101,8 +153,8 @@ async def test():
     except Exception as e:
         print(f"  ⚠️  Could not get log: {e}")
 
-    # ── 5. Teardown (graceful shutdown) ──────────────────────
-    section(5, "teardown() — graceful shutdown")
+    # ── 7. Teardown (graceful shutdown) ──────────────────────
+    section(7, "teardown() — graceful shutdown")
     t0 = time.time()
     try:
         await host.teardown()
@@ -114,8 +166,8 @@ async def test():
         import traceback; traceback.print_exc()
         errors.append(f"teardown() failed: {e}")
 
-    # ── 6. Verify cleanup on remote ─────────────────────────
-    section(6, "verify remote cleanup")
+    # ── 8. Verify cleanup on remote ─────────────────────────
+    section(8, "verify remote cleanup")
     try:
         remote_check = (
             f"if [ -d /tmp/{session_id} ]; then echo DIR_CHECK=EXISTS; else echo DIR_CHECK=GONE; fi; "

@@ -47,8 +47,14 @@ class HostManager:
         return host
 
     async def get_or_connect(self, name: str) -> RemoteHost:
+        """Get existing host object or create initial connection.
+
+        If a host object already exists (even temporarily disconnected), return it
+        so lower layers can attempt transport-only auto-recovery without forcing a
+        new session/deploy.
+        """
         host = self._connections.get(name)
-        if host and host.is_connected:
+        if host:
             return host
         return await self.connect(name)
 

@@ -138,26 +138,122 @@ class RemoteHost:
 
         logger.info(f"Remote host {self.config.name} disconnected")
 
-    async def _rpc(self, message: dict, timeout: float = 30.0) -> dict:
-        """Send one RPC message to remote_server and return normalized result."""
-        if not self._running or not self._authenticated:
+    async def _ensure_transport_ready(self) -> bool:
+        """Ensure we have an authenticated tunnel+websocket without redeploying.
+
+        Rules:
+        - If this object has never connected before, call full setup().
+        - If it connected before and later lost transport, only try transport-level
+          recovery (SSH tunnel + WebSocket + auth). No implicit redeploy/new session.
+        """
+        if self._running and self._authenticated and self.websocket:
+            return True
+
+        if self.session_id is None:
+            # First-time connect is allowed to deploy/start.
             await self.setup()
+            return True
+
+        # Existing session lost transport: recover only.
+        return await self._recover_transport()
+
+    def _is_transport_error(self, exc: Exception) -> bool:
+        if isinstance(exc, (ConnectionClosed, OSError, ConnectionError, RuntimeError)):
+            return True
+        msg = str(exc).lower()
+        return any(k in msg for k in [
+            "connection closed",
+            "broken pipe",
+            "connection reset",
+            "not connected",
+            "eof",
+        ])
+
+    async def _mark_transport_down(self) -> None:
+        self._running = False
+        self._authenticated = False
+
+        if self.websocket:
+            try:
+                await self.websocket.close()
+            except Exception:
+                pass
+            self.websocket = None
+
+        # Restart tunnel during recovery.
+        await self._close_ssh_tunnel()
+
+    async def _recover_transport(self) -> bool:
+        """Recover SSH tunnel + WS + auth for the same existing session.
+
+        IMPORTANT: no redeploy, no new session_id.
+        """
+        try:
+            await self._mark_transport_down()
+            await self._create_ssh_tunnel()
+            await self._connect_websocket()
+            await self._authenticate()
+            self._running = True
+            logger.info(f"Transport recovered for host {self.config.name} (session: {self.session_id})")
+            return True
+        except Exception as e:
+            logger.warning(f"Transport recovery failed for {self.config.name}: {e}")
+            await self._mark_transport_down()
+            return False
+
+    async def _rpc(self, message: dict, timeout: float = 30.0) -> dict:
+        """Send one RPC message to remote_server and return normalized result.
+
+        Uses request_id for idempotent retry and performs transport-only auto-heal.
+        """
+        request_id = message.get("request_id") or uuid.uuid4().hex
+        message["request_id"] = request_id
 
         try:
-            await self.websocket.send(json.dumps(message))
-            response = await asyncio.wait_for(self.websocket.recv(), timeout=timeout)
-            data = json.loads(response)
-
-            if data.get("type") == "result":
-                return data
-            if data.get("type") == "error":
-                return {"success": False, "error": data.get("message", "Unknown error")}
-            return {"success": False, "error": f"Unexpected response type: {data.get('type')}"}
-        except asyncio.TimeoutError:
-            return {"success": False, "error": f"Command timed out after {timeout} seconds"}
+            ready = await self._ensure_transport_ready()
         except Exception as e:
-            logger.error(f"RPC failed on {self.config.name}: {e}")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": f"Cannot connect to remote host: {e}"}
+
+        if not ready:
+            return {
+                "success": False,
+                "error": "Cannot connect to remote host or remote service is down",
+            }
+
+        for attempt in range(2):
+            try:
+                await self.websocket.send(json.dumps(message))
+                response = await asyncio.wait_for(self.websocket.recv(), timeout=timeout)
+                data = json.loads(response)
+
+                if data.get("request_id") and data.get("request_id") != request_id:
+                    return {"success": False, "error": "Mismatched request_id in response"}
+
+                if data.get("type") == "result":
+                    return data
+                if data.get("type") in ("error", "shutdown_ack"):
+                    return {"success": False, "error": data.get("message", "Unknown error")}
+                if data.get("type") == "pong":
+                    return {"success": True, "type": "pong"}
+                return {"success": False, "error": f"Unexpected response type: {data.get('type')}"}
+
+            except asyncio.TimeoutError:
+                return {"success": False, "error": f"Command timed out after {timeout} seconds"}
+            except Exception as e:
+                if attempt == 0 and self._is_transport_error(e):
+                    logger.warning(f"RPC transport issue on {self.config.name}, trying auto-recover: {e}")
+                    recovered = await self._recover_transport()
+                    if recovered:
+                        continue
+                    return {
+                        "success": False,
+                        "error": "Connection lost and auto-reconnect failed (remote host/service unavailable)",
+                    }
+
+                logger.error(f"RPC failed on {self.config.name}: {e}")
+                return {"success": False, "error": str(e)}
+
+        return {"success": False, "error": "RPC retry exhausted"}
 
     async def exec(self, command: str, timeout: float = 30.0) -> dict:
         """Execute a shell command on the remote host."""

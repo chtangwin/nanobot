@@ -29,6 +29,8 @@ import logging
 import time
 import uuid
 import difflib
+import hashlib
+from collections import deque
 from pathlib import Path
 
 try:
@@ -44,6 +46,29 @@ DEFAULT_PORT = 8765
 DEFAULT_SESSION_NAME = "nanobot"
 
 logger = logging.getLogger(__name__)
+
+# Request de-duplication cache (idempotency for client retry)
+_REQUEST_RESULTS: dict[str, dict] = {}
+_REQUEST_INFLIGHT: dict[str, asyncio.Future] = {}
+_REQUEST_ORDER: deque[str] = deque()
+_REQUEST_CACHE_MAX = 2000
+
+
+def _payload_hash(data: dict) -> str:
+    """Stable hash for request payload validation."""
+    stable = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(stable.encode("utf-8")).hexdigest()
+
+
+def _cache_response(request_id: str, payload_hash: str, response: dict) -> None:
+    _REQUEST_RESULTS[request_id] = {
+        "hash": payload_hash,
+        "response": response,
+    }
+    _REQUEST_ORDER.append(request_id)
+    while len(_REQUEST_ORDER) > _REQUEST_CACHE_MAX:
+        old = _REQUEST_ORDER.popleft()
+        _REQUEST_RESULTS.pop(old, None)
 
 
 class TmuxSession:
@@ -447,92 +472,130 @@ async def handle_connection(
     
     executor = CommandExecutor(use_tmux=use_tmux, socket_path=socket_path)
 
+    async def _dispatch_message(data: dict) -> tuple[dict, bool]:
+        """Dispatch one protocol message. Returns (response, should_break)."""
+        msg_type = data.get("type")
+
+        if msg_type in ("exec", "execute"):
+            command = data.get("command")
+            if not command:
+                return ({"type": "error", "message": "No command provided"}, False)
+
+            logger.info(f"Executing: {command[:100]}...")
+            result = await executor.exec(command)
+            return ({"type": "result", "command": command, **result}, False)
+
+        if msg_type == "read_file":
+            path = data.get("path")
+            if not path:
+                return ({"type": "error", "message": "No path provided"}, False)
+            result = await FileService.read_file(path)
+            return ({"type": "result", **result}, False)
+
+        if msg_type == "write_file":
+            path = data.get("path")
+            content = data.get("content")
+            if not path:
+                return ({"type": "error", "message": "No path provided"}, False)
+            if content is None:
+                return ({"type": "error", "message": "No content provided"}, False)
+            result = await FileService.write_file(path, content)
+            return ({"type": "result", **result}, False)
+
+        if msg_type == "edit_file":
+            path = data.get("path")
+            old_text = data.get("old_text")
+            new_text = data.get("new_text")
+            if not path:
+                return ({"type": "error", "message": "No path provided"}, False)
+            if old_text is None or new_text is None:
+                return ({"type": "error", "message": "old_text/new_text required"}, False)
+            result = await FileService.edit_file(path, old_text, new_text)
+            return ({"type": "result", **result}, False)
+
+        if msg_type == "list_dir":
+            path = data.get("path")
+            if not path:
+                return ({"type": "error", "message": "No path provided"}, False)
+            result = await FileService.list_dir(path)
+            return ({"type": "result", **result}, False)
+
+        if msg_type == "ping":
+            return ({"type": "pong"}, False)
+
+        if msg_type == "close":
+            logger.info("Received close message, closing connection")
+            return ({"type": "result", "success": True, "message": "Connection closing"}, True)
+
+        if msg_type == "shutdown":
+            logger.info("Received shutdown message, stopping server")
+            if stop_event:
+                stop_event.set()
+            return ({"type": "shutdown_ack", "message": "Server shutting down"}, True)
+
+        return ({"type": "error", "message": f"Unknown message type: {msg_type}"}, False)
+
     try:
         async for message in websocket:
             try:
                 data = json.loads(message)
-                msg_type = data.get("type")
+                request_id = data.get("request_id")
 
-                if msg_type in ("exec", "execute"):
-                    command = data.get("command")
-                    if not command:
+                # Fast path: no idempotency key
+                if not request_id:
+                    response, should_break = await _dispatch_message(data)
+                    await websocket.send(json.dumps(response))
+                    if should_break:
+                        break
+                    continue
+
+                payload_hash = _payload_hash(data)
+
+                # 1) Done cache
+                cached = _REQUEST_RESULTS.get(request_id)
+                if cached:
+                    if cached["hash"] != payload_hash:
                         await websocket.send(json.dumps({
                             "type": "error",
-                            "message": "No command provided"
+                            "request_id": request_id,
+                            "message": "request_id reuse with different payload",
                         }))
                         continue
+                    await websocket.send(json.dumps(cached["response"]))
+                    continue
 
-                    logger.info(f"Executing: {command[:100]}...")
-                    result = await executor.exec(command)
-                    await websocket.send(json.dumps({
-                        "type": "result",
-                        "command": command,
-                        **result
-                    }))
+                # 2) In-flight dedupe
+                in_flight = _REQUEST_INFLIGHT.get(request_id)
+                if in_flight:
+                    response = await in_flight
+                    await websocket.send(json.dumps(response))
+                    continue
 
-                elif msg_type == "read_file":
-                    path = data.get("path")
-                    if not path:
-                        await websocket.send(json.dumps({"type": "error", "message": "No path provided"}))
-                        continue
-                    result = await FileService.read_file(path)
-                    await websocket.send(json.dumps({"type": "result", **result}))
+                # 3) Execute and cache
+                loop = asyncio.get_running_loop()
+                fut: asyncio.Future = loop.create_future()
+                _REQUEST_INFLIGHT[request_id] = fut
 
-                elif msg_type == "write_file":
-                    path = data.get("path")
-                    content = data.get("content")
-                    if not path:
-                        await websocket.send(json.dumps({"type": "error", "message": "No path provided"}))
-                        continue
-                    if content is None:
-                        await websocket.send(json.dumps({"type": "error", "message": "No content provided"}))
-                        continue
-                    result = await FileService.write_file(path, content)
-                    await websocket.send(json.dumps({"type": "result", **result}))
-
-                elif msg_type == "edit_file":
-                    path = data.get("path")
-                    old_text = data.get("old_text")
-                    new_text = data.get("new_text")
-                    if not path:
-                        await websocket.send(json.dumps({"type": "error", "message": "No path provided"}))
-                        continue
-                    if old_text is None or new_text is None:
-                        await websocket.send(json.dumps({"type": "error", "message": "old_text/new_text required"}))
-                        continue
-                    result = await FileService.edit_file(path, old_text, new_text)
-                    await websocket.send(json.dumps({"type": "result", **result}))
-
-                elif msg_type == "list_dir":
-                    path = data.get("path")
-                    if not path:
-                        await websocket.send(json.dumps({"type": "error", "message": "No path provided"}))
-                        continue
-                    result = await FileService.list_dir(path)
-                    await websocket.send(json.dumps({"type": "result", **result}))
-
-                elif msg_type == "ping": 
-                    await websocket.send(json.dumps({"type": "pong"}))
-
-                elif msg_type == "close":
-                    logger.info("Received close message, closing connection")
-                    break
-
-                elif msg_type == "shutdown":
-                    logger.info("Received shutdown message, stopping server")
-                    await websocket.send(json.dumps({
-                        "type": "shutdown_ack",
-                        "message": "Server shutting down"
-                    }))
-                    if stop_event:
-                        stop_event.set()
-                    break
-
-                else:
-                    await websocket.send(json.dumps({
+                try:
+                    response, should_break = await _dispatch_message(data)
+                    response["request_id"] = request_id
+                    _cache_response(request_id, payload_hash, response)
+                    fut.set_result(response)
+                    await websocket.send(json.dumps(response))
+                    if should_break:
+                        break
+                except Exception as e:
+                    err_resp = {
                         "type": "error",
-                        "message": f"Unknown message type: {msg_type}"
-                    }))
+                        "request_id": request_id,
+                        "message": str(e),
+                    }
+                    _cache_response(request_id, payload_hash, err_resp)
+                    if not fut.done():
+                        fut.set_result(err_resp)
+                    await websocket.send(json.dumps(err_resp))
+                finally:
+                    _REQUEST_INFLIGHT.pop(request_id, None)
 
             except json.JSONDecodeError:
                 await websocket.send(json.dumps({
