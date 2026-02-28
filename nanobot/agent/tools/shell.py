@@ -1,7 +1,5 @@
 """Shell execution tool."""
 
-import asyncio
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -21,7 +19,6 @@ class ExecTool(Tool):
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
-        path_append: str = "",
     ):
         self.backend_router = backend_router
         self.timeout = timeout
@@ -39,7 +36,6 @@ class ExecTool(Tool):
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
-        self.path_append = path_append
 
     @property
     def name(self) -> str:
