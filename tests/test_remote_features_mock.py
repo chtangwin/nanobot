@@ -127,6 +127,64 @@ async def test_host_manager_get_or_connect_returns_existing_object():
     assert got is existing
 
 
+@pytest.mark.asyncio
+async def test_ensure_transport_ready_first_time_uses_setup():
+    cfg = HostConfig(name="h1", ssh_host="u@host")
+    host = RemoteHost(cfg)
+    host.session_id = None
+    host._running = False
+    host._authenticated = False
+
+    host.setup = AsyncMock(return_value="nanobot-new")
+    host._recover_transport = AsyncMock(side_effect=AssertionError("recover should not be called"))
+
+    ready = await host._ensure_transport_ready()
+
+    assert ready is True
+    assert host.setup.await_count == 1
+    assert host._recover_transport.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_rpc_detects_mismatched_response_request_id():
+    cfg = HostConfig(name="h1", ssh_host="u@host")
+    host = RemoteHost(cfg)
+    host.session_id = "nanobot-existing"
+    host._running = True
+    host._authenticated = True
+    host.websocket = StubClientWebSocket(
+        responses=[json.dumps({"type": "result", "request_id": "wrong-id", "success": True, "output": "ok"})]
+    )
+
+    result = await host._rpc({"type": "exec", "command": "echo hi", "request_id": "expected-id"}, timeout=1.0)
+
+    assert result["success"] is False
+    assert "Mismatched request_id" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_rpc_returns_timeout_error():
+    class SlowWebSocket:
+        async def send(self, payload: str):
+            return None
+
+        async def recv(self) -> str:
+            await asyncio.sleep(0.2)
+            return json.dumps({"type": "result", "success": True})
+
+    cfg = HostConfig(name="h1", ssh_host="u@host")
+    host = RemoteHost(cfg)
+    host.session_id = "nanobot-existing"
+    host._running = True
+    host._authenticated = True
+    host.websocket = SlowWebSocket()
+
+    result = await host._rpc({"type": "exec", "command": "echo hi"}, timeout=0.01)
+
+    assert result["success"] is False
+    assert "timed out" in result["error"]
+
+
 # =========================
 # Server-side (remote_server)
 # =========================
@@ -284,3 +342,14 @@ async def test_handle_connection_inflight_dedupe_across_connections(monkeypatch)
     assert ws2.sent[1]["type"] == "result"
     assert ws1.sent[1]["output"] == "shared-result"
     assert ws2.sent[1]["output"] == "shared-result"
+
+
+@pytest.mark.asyncio
+async def test_handle_connection_auth_failure_returns_error_only():
+    ws = FakeServerWebSocket(messages=[], auth_token="wrong-token")
+
+    await remote_server.handle_connection(ws, auth_token="expected-token", use_tmux=False)
+
+    assert len(ws.sent) == 1
+    assert ws.sent[0]["type"] == "error"
+    assert "Authentication failed" in ws.sent[0]["message"]
