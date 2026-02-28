@@ -1,9 +1,124 @@
 """Tests for redaction guard."""
 
+import pytest
+from pathlib import Path
+
 from nanobot.agent.tools.redaction import (
+    is_sensitive_path,
     redact_content,
+    redact_messages,
     redact_text,
 )
+
+
+class TestSensitivePath:
+    """Tests for is_sensitive_path function."""
+
+    def test_env_files(self):
+        """Test .env file detection."""
+        assert is_sensitive_path(Path(".env")) is True
+        assert is_sensitive_path(Path(".env.local")) is True
+        assert is_sensitive_path(Path(".env.production")) is True
+
+    def test_auth_files(self):
+        """Test auth file detection."""
+        assert is_sensitive_path(Path("auth.json")) is True
+        assert is_sensitive_path(Path("oauth.json")) is True
+
+    def test_ssh_keys(self):
+        """Test SSH key detection."""
+        assert is_sensitive_path(Path("id_rsa")) is True
+        assert is_sensitive_path(Path("id_rsa.pub")) is True
+        assert is_sensitive_path(Path("id_ed25519")) is True
+        assert is_sensitive_path(Path("id_ed25519.pub")) is True
+
+    def test_certificate_files(self):
+        """Test certificate file detection."""
+        assert is_sensitive_path(Path("server.pem")) is True
+        assert is_sensitive_path(Path("client.p12")) is True
+        assert is_sensitive_path(Path("keystore.pfx")) is True
+        assert is_sensitive_path(Path("truststore.jks")) is True
+        assert is_sensitive_path(Path("private.key")) is True
+
+        # Backup files with sensitive extensions (SHOULD be blocked)
+        assert is_sensitive_path(Path("server.pem.bak")) is True
+        assert is_sensitive_path(Path("client.p12.old")) is True
+        assert is_sensitive_path(Path("keystore.pfx.tmp")) is True
+        assert is_sensitive_path(Path("private.key.backup")) is True
+        assert is_sensitive_path(Path("cert.pem.save")) is True
+
+        # Non-sensitive backups (should NOT be blocked)
+        assert is_sensitive_path(Path("normal.txt.bak")) is False
+        assert is_sensitive_path(Path("config.json.old")) is False
+
+    def test_secret_files(self):
+        """Test secrets/credentials file detection."""
+        assert is_sensitive_path(Path("secrets.json")) is True
+        assert is_sensitive_path(Path("secrets.yaml")) is True
+        assert is_sensitive_path(Path("secrets.yml")) is True
+        assert is_sensitive_path(Path("secrets.toml")) is True
+        assert is_sensitive_path(Path("secrets.ini")) is True
+        assert is_sensitive_path(Path("credentials.json")) is True
+        assert is_sensitive_path(Path("credentials.yaml")) is True
+        assert is_sensitive_path(Path(".secrets")) is True
+
+    def test_paths_with_directories(self):
+        """Test paths with directory prefixes."""
+        assert is_sensitive_path(Path("/home/user/.env")) is True
+        assert is_sensitive_path(Path("C:/Users/me/.env.local")) is True
+        assert is_sensitive_path(Path("./config/.env")) is True
+        assert is_sensitive_path(Path("/project/secrets.json")) is True
+
+    def test_non_sensitive_files(self):
+        """Test that normal files are not blocked."""
+        assert is_sensitive_path(Path("src/app.py")) is False
+        assert is_sensitive_path(Path("README.md")) is False
+        assert is_sensitive_path(Path("package.json")) is False
+        assert is_sensitive_path(Path("config/app.yaml")) is False
+        assert is_sensitive_path(Path("data/credentials_sample.json")) is False
+
+    def test_path_traversal_attacks(self):
+        """Test that path traversal attacks are blocked."""
+        assert is_sensitive_path(Path("../.env")) is True
+        assert is_sensitive_path(Path("../../.env")) is True
+        assert is_sensitive_path(Path("subdir/../.env")) is True
+        assert is_sensitive_path(Path("./subdir/../.env")) is True
+
+    def test_path_objects(self):
+        """Test that Path objects work correctly."""
+        assert is_sensitive_path(Path(".env")) is True
+        assert is_sensitive_path(Path("../.env")) is True
+        assert is_sensitive_path(Path("subdir/../secrets.json")) is True
+        assert is_sensitive_path(Path("../auth.json")) is True
+        assert is_sensitive_path(Path("/project/config/.env")) is True
+
+    def test_case_insensitive_matching(self):
+        """Test that matching is case-insensitive."""
+        assert is_sensitive_path(Path(".ENV")) is True
+        assert is_sensitive_path(Path(".Env.Local")) is True
+        assert is_sensitive_path(Path("AUTH.JSON")) is True
+        assert is_sensitive_path(Path("Server.PEM")) is True
+
+    def test_empty_and_invalid_inputs(self):
+        """Test empty and invalid inputs."""
+        assert is_sensitive_path(Path("")) is False
+
+    def test_complex_extensions(self):
+        """Test files with backup extensions."""
+        # Sensitive files are blocked
+        assert is_sensitive_path(Path("file.pem")) is True
+        assert is_sensitive_path(Path("file.key")) is True
+
+        # Backup files with sensitive extensions are ALSO blocked
+        assert is_sensitive_path(Path("file.pem.bak")) is True
+        assert is_sensitive_path(Path("file.key.old")) is True
+        assert is_sensitive_path(Path("cert.p12.tmp")) is True
+
+        # Non-sensitive files and their backups are allowed
+        assert is_sensitive_path(Path("file.txt")) is False
+        assert is_sensitive_path(Path("file.txt.bak")) is False
+        assert is_sensitive_path(Path("file.json")) is False
+        assert is_sensitive_path(Path("file.json.old")) is False
 
 
 class TestRedactText:
@@ -71,8 +186,8 @@ class TestRedactText:
         assert "gh***" in result
         assert "xxxxxxxxxxxxxxxxxxxxxxxx" not in result
 
-        # GitHub PAT
-        text2 = "Use token in middle of string ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx for authentication"
+        # GitHub PAT in middle of string
+        text2 = "Use token ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx for authentication"
         result2 = redact_text(text2)
         assert "gh***" in result2
         assert "for authentication" in result2  # Text after token preserved
@@ -234,6 +349,11 @@ MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj
         assert redact_text("") == ""
         assert redact_text("   ") == "   "
 
+    def test_non_string(self):
+        """Test non-string input handling."""
+        assert redact_text(123) == 123
+        assert redact_text(None) is None
+
     def test_json_format_key_value(self):
         """Test JSON format key-value redaction.
 
@@ -328,4 +448,35 @@ class TestRedactContent:
         assert result[1]["type"] == "image_url"
 
 
+class TestRedactMessages:
+    """Tests for redact_messages function."""
 
+    def test_redact_history(self):
+        """Test message history redaction."""
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "My API key is sk-1234567890abcdefghijklmnopqrstuv"},
+            {"role": "user", "content": "Thanks"},
+        ]
+        result = redact_messages(messages)
+        assert result[1]["content"] == "My API key is sk-***"
+
+    def test_preserve_message_structure(self):
+        """Test that message structure is preserved."""
+        messages = [
+            {"role": "user", "content": "Test", "name": "test_user"},
+        ]
+        result = redact_messages(messages)
+        assert result[0]["role"] == "user"
+        assert result[0]["name"] == "test_user"
+        assert result[0]["content"] == "Test"
+
+    def test_empty_content(self):
+        """Test messages with empty content."""
+        messages = [
+            {"role": "user", "content": ""},
+            {"role": "assistant", "content": None},
+        ]
+        result = redact_messages(messages)
+        assert result[0]["content"] == ""
+        assert result[1].get("content") is None

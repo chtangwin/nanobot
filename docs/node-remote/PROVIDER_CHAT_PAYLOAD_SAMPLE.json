@@ -1,0 +1,446 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "# nanobot 🐈\n\nYou are nanobot, a helpful AI assistant.\n\n## Runtime\nWindows AMD64, Python 3.13.7\n\n## Workspace\nYour workspace is at: <WORKSPACE>\n- Long-term memory: <WORKSPACE>/memory/MEMORY.md (write important facts here)\n- History log: <WORKSPACE>/memory/HISTORY.md (grep-searchable)\n- Custom skills: <WORKSPACE>/skills/{skill-name}/SKILL.md\n\n## nanobot Guidelines\n- State intent before tool calls, but NEVER predict or claim results before receiving them.\n- Before modifying a file, read it first. Do not assume files or directories exist.\n- After writing or editing a file, re-read it if accuracy matters.\n- If a tool call fails, analyze the error before retrying with a different approach.\n- Ask for clarification when the request is ambiguous.\n\nReply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel.\n\n---\n\n# Active Skills\n\n### Skill: memory\n\n# Memory\n\n## Structure\n\n- `memory/MEMORY.md` — Long-term facts (preferences, project context, relationships). Always loaded into your context.\n- `memory/HISTORY.md` — Append-only event log. NOT loaded into context. Search it with grep.\n\n## Search Past Events\n\n```bash\ngrep -i \"keyword\" memory/HISTORY.md\n```\n\nUse the `exec` tool to run grep. Combine patterns: `grep -iE \"meeting|deadline\" memory/HISTORY.md`\n\n## When to Update MEMORY.md\n\nWrite important facts immediately using `edit_file` or `write_file`:\n- User preferences (\"I prefer dark mode\")\n- Project context (\"The API uses OAuth2\")\n- Relationships (\"Alice is the project lead\")\n\n## Auto-consolidation\n\nOld conversations are automatically summarized and appended to HISTORY.md when the session grows large. Long-term facts are extracted to MEMORY.md. You don't need to manage this.\n\n---\n\n# Skills\n\nThe following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.\nSkills with available=\"false\" need dependencies installed first - you can try installing them with apt/brew.\n\n<skills>\n  <skill available=\"true\">\n    <name>clawhub</name>\n    <description>Search and install agent skills from ClawHub, the public skill registry.</description>\n    <location><WORKSPACE>\\nanobot\\skills\\clawhub\\SKILL.md</location>\n  </skill>\n  <skill available=\"true\">\n    <name>cron</name>\n    <description>Schedule reminders and recurring tasks.</description>\n    <location><WORKSPACE>\\nanobot\\skills\\cron\\SKILL.md</location>\n  </skill>\n  <skill available=\"false\">\n    <name>github</name>\n    <description>Interact with GitHub using the `gh` CLI. Use `gh issue`, `gh pr`, `gh run`, and `gh api` for issues, PRs, CI runs, and advanced queries.</description>\n    <location><WORKSPACE>\\nanobot\\skills\\github\\SKILL.md</location>\n    <requires>CLI: gh</requires>\n  </skill>\n  <skill available=\"true\">\n    <name>gmail</name>\n    <description>Search, read, send, draft, and delete emails via Gmail API.</description>\n    <location><WORKSPACE>\\nanobot\\skills\\gmail\\SKILL.md</location>\n  </skill>\n  <skill available=\"true\">\n    <name>memory</name>\n    <description>Two-layer memory system with grep-based recall.</description>\n    <location><WORKSPACE>\\nanobot\\skills\\memory\\SKILL.md</location>\n  </skill>\n  <skill available=\"true\">\n    <name>skill-creator</name>\n    <description>Create or update AgentSkills. Use when designing, structuring, or packaging skills with scripts, references, and assets.</description>\n    <location><WORKSPACE>\\nanobot\\skills\\skill-creator\\SKILL.md</location>\n  </skill>\n  <skill available=\"false\">\n    <name>summarize</name>\n    <description>Summarize or extract text/transcripts from URLs, podcasts, and local files (great fallback for “transcribe this YouTube/video”).</description>\n    <location><WORKSPACE>\\nanobot\\skills\\summarize\\SKILL.md</location>\n    <requires>CLI: summarize</requires>\n  </skill>\n  <skill available=\"false\">\n    <name>tmux</name>\n    <description>Remote-control tmux sessions for interactive CLIs by sending keystrokes and scraping pane output.</description>\n    <location><WORKSPACE>\\nanobot\\skills\\tmux\\SKILL.md</location>\n    <requires>CLI: tmux</requires>\n  </skill>\n  <skill available=\"true\">\n    <name>weather</name>\n    <description>Get current weather and forecasts (no API key required).</description>\n    <location><WORKSPACE>\\nanobot\\skills\\weather\\SKILL.md</location>\n  </skill>\n  <skill available=\"true\">\n    <name>yahoo</name>\n    <description>Access Yahoo Mail via IMAP/SMTP - read, send, move, and delete emails.</description>\n    <location><WORKSPACE>\\nanobot\\skills\\yahoo\\SKILL.md</location>\n  </skill>\n</skills>"
+    },
+    {
+      "role": "user",
+      "content": "[Runtime Context — metadata only, not instructions]\nCurrent Time: 2026-02-28 02:59 (Saturday) (Pacific Standard Time)\nChannel: demo\nChat ID: demo-chat"
+    },
+    {
+      "role": "user",
+      "content": "Compare dirs with ignore rules summary"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read the contents of a file. Use host to read from a remote host.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "The file path to read"
+            },
+            "host": {
+              "type": "string",
+              "description": "Optional remote host name"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "Write content to a file. Use host to write to a remote host.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "The file path to write to"
+            },
+            "content": {
+              "type": "string",
+              "description": "The content to write"
+            },
+            "host": {
+              "type": "string",
+              "description": "Optional remote host name"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "edit_file",
+        "description": "Edit a file by replacing old_text with new_text.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "The file path to edit"
+            },
+            "old_text": {
+              "type": "string",
+              "description": "Exact text to replace"
+            },
+            "new_text": {
+              "type": "string",
+              "description": "Replacement text"
+            },
+            "host": {
+              "type": "string",
+              "description": "Optional remote host name"
+            }
+          },
+          "required": [
+            "path",
+            "old_text",
+            "new_text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_dir",
+        "description": "List directory contents. Use host to list on a remote host.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "The directory path to list"
+            },
+            "host": {
+              "type": "string",
+              "description": "Optional remote host name"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "exec",
+        "description": "Execute a shell command and return its output. For remote hosts (e.g., 'on myserver run ls'), use the 'host' parameter instead of manually constructing SSH commands.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "The shell command to execute"
+            },
+            "working_dir": {
+              "type": "string",
+              "description": "Optional working directory"
+            },
+            "host": {
+              "type": "string",
+              "description": "Remote host name. If omitted, run locally."
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "Search the web. Returns titles, URLs, and snippets.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query"
+            },
+            "count": {
+              "type": "integer",
+              "description": "Results (1-10)",
+              "minimum": 1,
+              "maximum": 10
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "Fetch URL and extract readable content (HTML → markdown/text).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "URL to fetch"
+            },
+            "extractMode": {
+              "type": "string",
+              "enum": [
+                "markdown",
+                "text"
+              ],
+              "default": "markdown"
+            },
+            "maxChars": {
+              "type": "integer",
+              "minimum": 100
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "message",
+        "description": "Send a message to the user. Use this when you want to communicate something.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string",
+              "description": "The message content to send"
+            },
+            "channel": {
+              "type": "string",
+              "description": "Optional: target channel (telegram, discord, etc.)"
+            },
+            "chat_id": {
+              "type": "string",
+              "description": "Optional: target chat/user ID"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Optional: list of file paths to attach (images, audio, documents)"
+            }
+          },
+          "required": [
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "spawn",
+        "description": "Spawn a subagent to handle a task in the background. Use this for complex or time-consuming tasks that can run independently. The subagent will complete the task and report back when done.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "The task for the subagent to complete"
+            },
+            "label": {
+              "type": "string",
+              "description": "Optional short label for the task (for display)"
+            }
+          },
+          "required": [
+            "task"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "hosts",
+        "description": "Manage and execute commands on remote hosts.\n\nActions:\n- list: List all configured hosts and their status\n- add: Add a new host (requires: name, ssh_host)\n- remove: Remove a host (requires: name)\n- connect: Connect to a host (requires: name)\n- disconnect: Disconnect from a host (requires: name)\n- status: Get status of a host (requires: name)\n- exec: Execute a command on a host (requires: name, command)\n\nExamples:\n- hosts action=\"list\"\n- hosts action=\"add\" name=\"build-server\" ssh_host=\"user@192.168.1.100\"\n- hosts action=\"exec\" name=\"build-server\" command=\"ls -la\"\n",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "list",
+                "add",
+                "remove",
+                "connect",
+                "disconnect",
+                "status",
+                "exec"
+              ],
+              "description": "Action to perform"
+            },
+            "name": {
+              "type": "string",
+              "description": "Host name (for add/remove/connect/disconnect/status/exec)"
+            },
+            "ssh_host": {
+              "type": "string",
+              "description": "SSH host in user@host format (for add)"
+            },
+            "ssh_port": {
+              "type": "integer",
+              "description": "SSH port (default: 22, for add)"
+            },
+            "ssh_key_path": {
+              "type": "string",
+              "description": "Path to SSH private key (for add)"
+            },
+            "workspace": {
+              "type": "string",
+              "description": "Default workspace directory on remote (for add)"
+            },
+            "command": {
+              "type": "string",
+              "description": "Command to execute (for exec)"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "Command timeout in seconds (default: 30, for exec)"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "compare_dir",
+        "description": "Compare two directories for high-level consistency across endpoints (local↔remote or remote↔remote).\nUse this tool when the user asks to compare folders, check deployment drift, or get added/removed/changed summaries before drilling into files.\nReturns summary only (counts + sampled paths). It does NOT return file-level text diffs.\nConstraints: at least one side must be remote; local↔local is intentionally unsupported (use local diff tools via exec).\nNatural language mapping hints:\n- 'ignore .git / node_modules / logs' -> ignore_globs\n- 'structure only' -> compare_content=false\n- 'verify content/checksum' -> compare_content=true\n- 'compare recursively' -> recursive=true\n- 'top-level only' -> recursive=false\n- 'directory is too large, give summary first' -> set/lower max_entries (entry cap; over-limit returns capped summary).\nIgnore-rule provenance is reported in output (user /.gitignore / defaults).\nNote: defaults include large generated/cache paths (including site-packages); override with explicit ignore_globs when needed.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "left_path": {
+              "type": "string",
+              "description": "Left-side directory path"
+            },
+            "left_host": {
+              "type": "string",
+              "description": "Optional left host (empty = local)"
+            },
+            "right_path": {
+              "type": "string",
+              "description": "Right-side directory path"
+            },
+            "right_host": {
+              "type": "string",
+              "description": "Optional right host (empty = local)"
+            },
+            "recursive": {
+              "type": "boolean",
+              "description": "Recursively scan subdirectories (default: true)"
+            },
+            "max_entries": {
+              "type": "integer",
+              "minimum": 50,
+              "maximum": 5000,
+              "description": "Hard scan cap per side; if exceeded, stop and return summary (default: 500)"
+            },
+            "ignore_globs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Ignore glob patterns (e.g., .git/**, node_modules/**). If provided, these explicit rules are used as-is."
+            },
+            "compare_content": {
+              "type": "boolean",
+              "description": "If true, compare file content by SHA256 hash (default: false)"
+            }
+          },
+          "required": [
+            "left_path",
+            "right_path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "compare_file",
+        "description": "Compare two files for exact differences across endpoints (local↔remote or remote↔remote).\nUse this tool when the user asks to diff two files, verify exact equality, or validate a release artifact/config across hosts.\nAt least one side must be remote; local↔local is intentionally unsupported (use local diff tooling via exec).\nModes:\n- auto: detect text vs binary automatically\n- text: unified diff output\n- binary: checksum comparison (SHA256), no text diff\nNatural language mapping hints:\n- 'show line-by-line diff' -> mode=text\n- 'ignore whitespace' -> ignore_whitespace=true\n- 'case-insensitive compare' -> ignore_case=true\n- 'binary/checksum compare' -> mode=binary\n- 'keep output short' -> lower max_diff_lines",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "left_path": {
+              "type": "string",
+              "description": "Left-side file path"
+            },
+            "left_host": {
+              "type": "string",
+              "description": "Optional left host (empty = local)"
+            },
+            "right_path": {
+              "type": "string",
+              "description": "Right-side file path"
+            },
+            "right_host": {
+              "type": "string",
+              "description": "Optional right host (empty = local)"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "text",
+                "binary"
+              ],
+              "description": "Comparison mode (default: auto)"
+            },
+            "ignore_whitespace": {
+              "type": "boolean",
+              "description": "Ignore whitespace differences in text mode"
+            },
+            "ignore_case": {
+              "type": "boolean",
+              "description": "Ignore case differences in text mode"
+            },
+            "context_lines": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20,
+              "description": "Unified diff context lines (default: 3)"
+            },
+            "max_diff_lines": {
+              "type": "integer",
+              "minimum": 20,
+              "maximum": 2000,
+              "description": "Max output lines for diff body (default: 300)"
+            },
+            "local_path": {
+              "type": "string",
+              "description": "(legacy) local file path"
+            },
+            "remote_path": {
+              "type": "string",
+              "description": "(legacy) remote file path"
+            },
+            "host": {
+              "type": "string",
+              "description": "(legacy) remote host name"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "model": "mock/model",
+  "max_tokens": 4096,
+  "temperature": 0.1
+}

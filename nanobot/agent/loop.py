@@ -12,18 +12,22 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent.backends import ExecutionBackendRouter, LocalExecutionBackend
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.filesystem import CompareDirTool, CompareFileTool, EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.hosts import HostsTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.remote.config import HostsConfig
+from nanobot.remote.manager import HostManager
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
@@ -61,6 +65,9 @@ class AgentLoop:
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
+        block_sensitive_files: bool = True,
+        redact_tool_outputs: bool = True,
+        redact_context: bool = True,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
@@ -80,10 +87,33 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.block_sensitive_files = block_sensitive_files
+        self.redact_tool_outputs = redact_tool_outputs
+        self.redact_context = redact_context
 
-        self.context = ContextBuilder(workspace)
+        self.context = ContextBuilder(
+            workspace,
+            redact_tool_outputs=self.redact_tool_outputs,
+            redact_context=self.redact_context,
+        )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+        
+        # Initialize HostManager for remote host connection lifecycle
+        hosts_config = HostsConfig.load(HostsConfig.get_default_config_path())
+        self.host_manager = HostManager(hosts_config)
+
+        allowed_dir = self.workspace if self.restrict_to_workspace else None
+        self.backend_router = ExecutionBackendRouter(
+            local_backend=LocalExecutionBackend(
+                workspace=self.workspace,
+                allowed_dir=allowed_dir,
+                block_sensitive_files=self.block_sensitive_files,
+                path_append=self.exec_config.path_append,
+            ),
+            host_manager=self.host_manager,
+        )
+        
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -95,6 +125,7 @@ class AgentLoop:
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            block_sensitive_files=self.block_sensitive_files,
         )
 
         self._running = False
@@ -111,19 +142,28 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
-        for cls in (ReadFileTool, WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+        # Filesystem tools
+        self.tools.register(ReadFileTool(self.backend_router))
+        self.tools.register(WriteFileTool(self.backend_router))
+        self.tools.register(EditFileTool(self.backend_router))
+        self.tools.register(ListDirTool(self.backend_router))
+
+        # Shell execution tool
         self.tools.register(ExecTool(
+            backend_router=self.backend_router,
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
-            path_append=self.exec_config.path_append,
         ))
+
+        # Other tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
+        self.tools.register(HostsTool(host_manager=self.host_manager))
+        self.tools.register(CompareDirTool(self.backend_router))
+        self.tools.register(CompareFileTool(self.backend_router))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
