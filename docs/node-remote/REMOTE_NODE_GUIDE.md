@@ -27,8 +27,10 @@
 
 **远程**：
 - ✅ SSH 访问权限
-- ✅ Python 3.11+ 或 `uv`（如没有会自动安装）
+- ✅ `curl` 或 `wget`（用于自动安装 `uv`，如未安装）
 - ✅ `tmux`（推荐，用于会话保持）
+
+> **注意**：远程不需要预装 Python 或 uv。首次连接时 `deploy.sh` 会自动检测并安装 `uv`。
 
 ### 三步上手
 
@@ -516,11 +518,11 @@ nodes action="add" \
 ────────────────────────────────────────
 nanobot agent                /tmp/nanobot-xxx/
   ├─ NodeManager             ├─ node_server.py
-  ├─ RemoteNode              ├─ config.json
-  └─ SSH 隧道                ├─ node_server.log
-      ↓                      └─ tmux session
-WebSocket
-  ↓
+  ├─ RemoteNode              ├─ deploy.sh
+  └─ SSH 隧道                ├─ server.pid
+      ↓                      ├─ node_server.log
+WebSocket ← SSH tunnel →    ├─ tmux.sock
+  ↓                          └─ tmux session "nanobot"
 execute command
 ```
 
@@ -528,14 +530,18 @@ execute command
 
 ```
 1. 用户："连接到 myserver"
-2. nanobot：SSH → myserver
-3. nanobot：部署 node_server.py 到 /tmp/nanobot-xxx/
-4. nanobot：生成并上传 config.json
-5. nanobot：启动 uv run node_server.py --config config.json
-6. nanobot：创建 SSH 隧道（localhost:XXXX → remote:8765）
-7. nanobot：通过隧道连接 WebSocket
-8. nanobot：在远程创建 tmux 会话
-9. [准备执行命令]
+2. nanobot：创建 SSH 隧道（localhost:XXXX → remote:8765）
+3. nanobot：在本地准备 staging 目录（node_server.py + deploy.sh）
+4. nanobot：scp -r 一次性上传所有文件到 /tmp/nanobot-xxx/
+5. nanobot：ssh 执行 deploy.sh --port 8765 [--token ...]
+   deploy.sh：
+     a. 检查/安装 uv（自动 curl 下载）
+     b. 清理旧进程
+     c. 启动 node_server.py（setsid + disown 后台运行）
+     d. 轮询等待端口就绪（最多 60s）
+6. nanobot：通过隧道连接 WebSocket
+7. nanobot：认证
+8. [准备执行命令]
 ```
 
 ### 命令执行流程
@@ -544,10 +550,11 @@ execute command
 ```
 1. exec command="ls" node="myserver" working_dir="/var/log"
 2. nanobot → WebSocket: {"type": "execute", "command": "cd /var/log && ls"}
-3. 远程：tmux send-keys "cd /var/log && ls"
-4. 远程：tmux capture-pane
-5. 远程：WebSocket 响应 → nanobot
-6. nanobot：向用户显示结果
+3. 远程：tmux send-keys 发送带唯一 marker 的 wrapped command
+4. 远程：轮询 capture-pane，直到出现 END marker
+5. 远程：提取 START/END 之间的输出 + exit code
+6. 远程：WebSocket 响应 → nanobot
+7. nanobot：向用户显示结果
 ```
 
 **会话保持**：
@@ -560,11 +567,24 @@ execute command
 ### 断开连接清理
 
 ```
-1. 关闭 WebSocket
-2. 杀死远程 tmux 会话
-3. rm -rf /tmp/nanobot-xxx/
-4. 关闭 SSH 隧道
-[远程服务器清理干净 - 无痕迹]
+teardown()
+  │
+  ├─ 1. 通过 WebSocket 发送 shutdown 请求
+  │     node_server 收到后：
+  │       ├─ 回复 shutdown_ack
+  │       ├─ 清理 tmux（先 exit → 再 kill-session）
+  │       └─ 设置 stop_event → 服务器正常退出
+  │
+  ├─ 2. 如果优雅关闭失败（超时/网络断开）→ SSH fallback
+  │     ├─ SIGTERM via PID 文件 → 等 1s → SIGKILL（仅若仍活）
+  │     ├─ fuser -k 端口（兜底）
+  │     └─ tmux kill-session（兜底）
+  │
+  ├─ 3. rm -rf /tmp/nanobot-xxx/（清理远程文件）
+  │
+  └─ 4. 关闭 SSH 隧道（最后关闭，前面步骤需要它）
+
+[远程服务器清理干净 — 无痕迹]
 ```
 
 ---
@@ -649,13 +669,13 @@ exec command="cd /app && git pull" node="prod3"
 # 1. 测试 SSH 连接
 ssh root@10.0.0.174
 
-# 2. 检查远程 Python
-ssh root@10.0.0.174 "python3 --version"
+# 2. 检查远程是否有 curl 或 wget（deploy.sh 用来安装 uv）
+ssh root@10.0.0.174 "which curl || which wget"
 
-# 3. 检查远程 uv
+# 3. 检查远程 uv（首次连接会自动安装）
 ssh root@10.0.0.174 "uv --version"
 
-# 4. 如果缺少 uv，安装
+# 4. 手动安装 uv（如自动安装失败）
 ssh root@10.0.0.174 "curl -LsSf https://astral.sh/uv/install.sh | sh"
 ```
 
@@ -735,8 +755,11 @@ ls -la /tmp/nanobot-*/
 # 3. 查看日志
 cat /tmp/nanobot-xxx/node_server.log
 
-# 4. 查看配置
-cat /tmp/nanobot-xxx/config.json
+# 4. 查看进程 PID
+cat /tmp/nanobot-xxx/server.pid
+
+# 5. 检查进程是否在运行
+ps -p $(cat /tmp/nanobot-xxx/server.pid)
 ```
 
 **更多调试信息**：参见 [DEBUGGING.md](./DEBUGGING.md)
@@ -814,15 +837,12 @@ exec command="nohup command > /tmp/task.log 2>&1 &" node="myserver"
 ### 远程（服务器）
 
 - SSH 服务器
-- Python 3.11+（或 uv 会安装它）
 - `bash`
+- `curl` 或 `wget`（用于自动安装 `uv`，如已有 `uv` 则不需要）
 - `tmux`（可选，推荐用于会话保持）
 
-### 首次连接
-
-远程服务器需要以下任一条件：
-- 已安装 `uv`
-- 或者允许自动安装（通过 curl）
+> **首次连接**：`deploy.sh` 会自动检测并安装 `uv`（通过 `curl` 或 `wget`），
+> 然后 `uv` 会自动管理 Python 和 `websockets` 依赖。无需手动预装。
 
 ---
 

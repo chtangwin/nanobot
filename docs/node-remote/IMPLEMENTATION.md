@@ -12,11 +12,13 @@
 │  ├── nodes/                                                 │
 │  │   ├── config.py      - 节点配置管理                      │
 │  │   ├── connection.py  - RemoteNode (SSH + WebSocket)     │
-│  │   └── manager.py     - NodeManager (多节点)              │
+│  │   ├── manager.py     - NodeManager (多节点)              │
+│  │   ├── node_server.py - 部署到远程的 WebSocket 服务器     │
+│  │   └── deploy.sh      - 部署到远程的启动脚本              │
 │  ├── agent/tools/                                           │
 │  │   ├── nodes.py       - NodesTool (用户界面)              │
 │  │   ├── shell.py       - exec 支持节点参数                 │
-│  │   └── filesystem.py  - read/write 支持节点参数           │
+│  │   └── filesystem.py  - read/write/compare 支持节点参数   │
 │  └── config/                                                │
 │      └── nodes.json     - 存储的节点配置                    │
 └─────────────────────────────────────────────────────────────┘
@@ -26,8 +28,12 @@
 ┌─────────────────────────────────────────────────────────────┐
 │  远程服务器                                                  │
 │                                                             │
-│  /tmp/nanobot-xxx/                                          │
-│  └── node_server.py   - WebSocket 服务器 + tmux 包装器     │
+│  /tmp/nanobot-<session>/                                    │
+│  ├── node_server.py   - WebSocket 服务器 + tmux 包装器     │
+│  ├── deploy.sh        - 启动脚本（检查 uv / 启动服务器）   │
+│  ├── server.pid       - 服务器进程 PID                     │
+│  ├── node_server.log  - 服务器日志                         │
+│  └── tmux.sock        - tmux 会话 socket                   │
 │                                                             │
 │  tmux 会话 "nanobot"  - 保持命令上下文                      │
 └─────────────────────────────────────────────────────────────┘
@@ -70,36 +76,67 @@
 - `setup()`：建立连接
   1. 生成唯一会话 ID
   2. 创建 SSH 隧道
-  3. 部署节点脚本
-  4. 启动节点进程
-  5. 连接 WebSocket
-  6. 认证
+  3. 部署并启动节点（单次操作）
+  4. 连接 WebSocket
+  5. 认证
 
-- `teardown()`：清理资源
-  1. 关闭 WebSocket
-  2. 停止节点进程
-  3. 清理远程临时文件
-  4. 关闭 SSH 隧道
+- `teardown()`：清理资源（优雅关闭优先）
+  1. 通过 WebSocket 发送 `shutdown` → 等待确认
+  2. 如果优雅关闭失败 → SSH fallback (PID kill / fuser / tmux)
+  3. 清理远程会话目录
+  4. 关闭 SSH 隧道（最后）
 
 - `execute()`：远程执行命令
   1. 发送 WebSocket 消息
   2. 等待响应
   3. 返回结果
 
-**流程**：
+**setup 流程**：
 ```
 setup()
   ├─ _create_ssh_tunnel()
   │   └─ ssh -N -L local:remote user@host
-  ├─ _deploy_node()
-  │   ├─ mkdir /tmp/nanobot-xxx/
-  │   └─ base64 编码脚本
-  ├─ _start_node()
-  │   └─ uv run node_server.py
+  ├─ _deploy_and_start_node()
+  │   ├─ 本地 staging 目录: node_server.py + deploy.sh
+  │   ├─ ssh mkdir -p /tmp/nanobot-xxx/
+  │   ├─ scp -r (一次性上传所有文件)
+  │   └─ ssh bash deploy.sh --port PORT [--token TOKEN]
+  │       deploy.sh 在远程执行：
+  │       ├─ 检测 uv，未安装则 curl 自动安装
+  │       ├─ fuser -k 清理旧进程
+  │       ├─ setsid + disown 后台启动 node_server.py
+  │       ├─ 保存 PID 到 server.pid
+  │       └─ 轮询端口就绪（最多 60s）
   ├─ _connect_websocket()
   │   └─ websockets.connect(ws://localhost:port)
   └─ _authenticate()
       └─ 发送令牌，等待确认
+```
+
+**teardown 流程**：
+```
+teardown()
+  │
+  ├─ 1. _request_shutdown()           ← 优雅关闭
+  │     ├─ WebSocket 发送 {"type": "shutdown"}
+  │     ├─ 等待 shutdown_ack（5s 超时）
+  │     ├─ 等 2s 让 node_server 完成清理
+  │     │   node_server 内部：
+  │     │     ├─ executor.cleanup()
+  │     │     │   └─ tmux.destroy()
+  │     │     │       ├─ send-keys "exit" (优雅退出 shell)
+  │     │     │       └─ kill-session (兜底)
+  │     │     └─ stop_event.set() → 进程正常退出
+  │     └─ 关闭本地 WebSocket 对象
+  │
+  ├─ 2. _force_stop_node()            ← 仅当优雅关闭失败
+  │     ├─ SIGTERM via server.pid → 等 1s → SIGKILL
+  │     ├─ fuser -k 端口（兜底）
+  │     └─ tmux kill-session（兜底）
+  │
+  ├─ 3. ssh rm -rf /tmp/nanobot-xxx/  ← 清理远程文件
+  │
+  └─ 4. _close_ssh_tunnel()           ← 最后关闭
 ```
 
 ### nanobot/nodes/manager.py
@@ -125,6 +162,17 @@ setup()
 ### nanobot/agent/tools/nodes.py
 
 **用途**：面向用户的节点管理工具
+
+**重要**：`NodesTool` 接收外部 `NodeManager` 实例，与 `ExecTool`、
+`ReadFileTool`、`WriteFileTool`、`CompareTool` 共享同一个管理器。
+这确保通过 `NodesTool` 连接的节点对所有工具可见。
+
+```python
+# loop.py 中的初始化
+self.node_manager = NodeManager(nodes_config)
+self.tools.register(NodesTool(node_manager=self.node_manager))
+self.tools.register(ExecTool(..., node_manager=self.node_manager))
+```
 
 **工具操作**：
 | 操作 | 方法 | 说明 |
@@ -177,60 +225,69 @@ execute(command, node=None)
 _write_remote(path, content, node)
   ├─ base64.b64encode(content)
   ├─ node_manager.execute(
-  │     f"mkdir -p $(dirname {path}) && echo {encoded} | base64 -d > {path}",
+  │     f"mkdir -p \"$(dirname '{path}')\" && echo '{encoded}' | base64 -d > '{path}'",
   │     node
-  │   )
+  │   )  # 路径加引号防止 shell 注入
   └─ 返回结果
 ```
 
+**CompareTool**：比较本地和远程文件，输出 unified diff 格式。
+
 ### nanobot/nodes/node_server.py
 
-**用途**：部署到远程服务器
+**用途**：部署到远程服务器的 WebSocket 命令执行服务器
 
 **组件**：
 - `TmuxSession`：管理 tmux 会话
+  - `create()`：创建会话（清理旧的残留会话）
+  - `send_and_capture()`：发送命令并抓取输出（基于唯一 marker）
+  - `destroy()`：优雅退出（先 `exit` → 再 `kill-session` 兜底）
 - `CommandExecutor`：通过 tmux 执行命令
-- `handle_connection()`：WebSocket 处理器
+  - `_execute_tmux()` 根据 marker 提取输出，并返回真实 `exit_code`
+- `handle_connection()`：WebSocket 处理器，接收 `stop_event` 用于优雅关闭
 
-**协议**：
+**tmux 输出捕获策略（已修复 prompt 误判问题）**：
+```
+wrapped command:
+  echo __NANOBOT_START_<id>__
+  <original command>
+  _nanobot_ec=$?
+  echo
+  echo __NANOBOT_END_<id>__$_nanobot_ec
+
+capture loop:
+  1. send-keys 发送 wrapped command
+  2. 轮询 capture-pane（最多 60s）直到出现 END marker
+  3. 提取 START/END 之间的内容作为 output
+  4. 从 END marker 解析 exit_code，计算 success=(exit_code==0)
+```
+
+这样不再依赖 `$`/`#` prompt 检测，避免输出中包含 `$`/`#` 时的误解析。
+
+**WebSocket 协议**：
 ```json
 // 认证
 {"token": "optional-token"}
-
 → {"type": "authenticated", "message": "..."}
 
 // 执行命令
 {"type": "execute", "command": "ls -la"}
-
 → {"type": "result", "success": true, "output": "...", "error": null}
 
 // Ping/pong
 {"type": "ping"}
-
 → {"type": "pong"}
 
-// 关闭
+// 关闭连接（服务器继续运行）
 {"type": "close"}
+
+// 关闭整个服务器（优雅退出）
+{"type": "shutdown"}
+→ {"type": "shutdown_ack", "message": "Server shutting down"}
+// 然后 stop_event.set() → 服务器退出
 ```
 
-**用法**：
-
-1. **使用配置文件**（推荐）：
-```bash
-# 在远程服务器上
-uv run --with websockets node_server.py --config config.json
-```
-
-配置文件格式 (`config.json`)：
-```json
-{
-  "port": 8765,
-  "token": "secret-token",
-  "tmux": true
-}
-```
-
-2. **使用命令行参数**：
+**启动方式**（通过 CLI 参数，不使用 config.json）：
 ```bash
 # 基本启动
 uv run --with websockets node_server.py --port 8765
@@ -239,28 +296,63 @@ uv run --with websockets node_server.py --port 8765
 uv run --with websockets node_server.py --port 8765 --token secret
 
 # 不使用 tmux（无会话保持）
-uv run --with websockets node_server.py --no-tmux
+uv run --with websockets node_server.py --port 8765 --no-tmux
 ```
+
+> **注意**：`--config` 参数仍然支持但不再由 `deploy.sh` 使用。
+> 所有配置通过 CLI 参数传递，消除了 config.json 文件的依赖。
+
+### nanobot/nodes/deploy.sh
+
+**用途**：在远程服务器上部署并启动 node_server.py
+
+**参数**：`bash deploy.sh --port PORT [--token TOKEN] [--no-tmux]`
+
+**执行流程**：
+```
+1. 解析 --port / --token / --no-tmux 参数
+2. ensure_uv()
+   ├─ command -v uv → 已安装，跳过
+   └─ 未安装 → curl (或 wget) https://astral.sh/uv/install.sh | sh
+       └─ 更新 PATH ($HOME/.local/bin, $HOME/.cargo/bin)
+3. fuser -k PORT/tcp → 清理旧进程
+4. setsid uv run --with websockets node_server.py ... &
+5. 保存 PID 到 server.pid，disown
+6. 轮询端口就绪（ss / netstat / /dev/tcp，最多 60s）
+   ├─ 就绪 → exit 0
+   └─ 超时 → 打印日志尾部 → exit 1
+```
+
+**所有运行时文件均在 session 目录** `/tmp/nanobot-<session>/`：
+- `server.pid` — 进程 PID（用于精确 kill）
+- `node_server.log` — 服务器日志
+- `tmux.sock` — tmux 会话 socket
 
 ## 与现有工具的集成
 
 ### 工具初始化
 
-在工具中启用远程节点支持：
+所有节点感知工具必须共享同一个 `NodeManager` 实例。
+在 `AgentLoop._register_default_tools()` 中统一初始化：
 
 ```python
 from nanobot.nodes.manager import NodeManager
 from nanobot.nodes.config import NodesConfig
 
-# 创建节点管理器
+# 创建共享的节点管理器
 config = NodesConfig.load(NodesConfig.get_default_config_path())
-node_manager = NodeManager(config)
+self.node_manager = NodeManager(config)
 
-# 使用节点管理器初始化工具
-exec_tool = ExecTool(node_manager=node_manager)
-read_tool = ReadFileTool(node_manager=node_manager)
-write_tool = WriteFileTool(node_manager=node_manager)
+# 所有工具使用同一个实例
+self.tools.register(NodesTool(node_manager=self.node_manager))
+self.tools.register(ExecTool(..., node_manager=self.node_manager))
+self.tools.register(ReadFileTool(..., node_manager=self.node_manager))
+self.tools.register(WriteFileTool(..., node_manager=self.node_manager))
+self.tools.register(CompareTool(node_manager=self.node_manager))
 ```
+
+> **关键**：不要让 `NodesTool` 内部创建自己的 `NodeManager`，
+> 否则通过它连接的节点对其他工具不可见。
 
 ### 工具参数流程
 
@@ -343,9 +435,10 @@ test_remote_node_config()
 
 | 操作 | 时间 | 说明 |
 |------|------|------|
-| SSH 隧道 | ~200ms | 首次连接 |
-| 部署脚本 | ~500ms | 首次连接 |
-| 启动节点 | ~2s | 首次连接（uv 安装） |
+| SSH 隧道 | ~2s | 首次连接 |
+| scp 上传 | ~1s | 上传 node_server.py + deploy.sh |
+| deploy.sh | ~3-5s | uv 已安装时 |
+| deploy.sh | ~30-60s | 首次安装 uv + websockets |
 | WebSocket 连接 | ~50ms | 隧道建立后 |
 | 命令执行 | ~10ms | 每条命令 |
 | 后续连接 | ~250ms | 使用现有节点 |
@@ -414,9 +507,9 @@ logging.getLogger("nanobot.nodes").setLevel(logging.DEBUG)
 - 检查：防火墙允许连接
 
 **问题**："WebSocket connection timeout"（WebSocket 连接超时）
-- 检查：远程有 Python 3.11+
-- 检查：远程已安装 `uv`
-- 检查：远程可以安装 `websockets`
+- 检查：远程有 `curl` 或 `wget`（deploy.sh 用来安装 uv）
+- 检查：远程日志 `/tmp/nanobot-xxx/node_server.log`
+- 检查：deploy.sh 的输出（连接时显示在本地日志中）
 
 **问题**："Command not found on remote"（远程找不到命令）
 - 检查：远程的 PATH
