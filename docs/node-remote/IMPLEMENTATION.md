@@ -484,6 +484,8 @@ Tools:
 
 这就是“LLM 如何知道本分支远程能力”的核心入口。
 
+> 总结：LLM 通过 tool schema 学会“业务操作用 `exec/read_file/... + host`，生命周期管理用 `hosts action=...`”，再由 `router/manager/remote` classes 执行落地。
+
 ## 错误处理
 
 ### 连接错误
