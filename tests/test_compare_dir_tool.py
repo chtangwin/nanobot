@@ -86,11 +86,10 @@ async def test_compare_dir_structure_summary_and_ignore_note():
 
     result = await tool.execute(left_host="l", left_path="/left", right_host="r", right_path="/right")
 
-    assert "Directory comparison summary" in result
-    assert "- only in left: 1" in result
-    assert "- only in right: 1" in result
-    assert "only_left.txt" in result
-    assert "only_right.txt" in result
+    assert "COMPARE_DIR v1" in result
+    assert "ONLY_LEFT only_left.txt" in result
+    assert "ONLY_RIGHT only_right.txt" in result
+    assert "SUMMARY only_left=1 only_right=1" in result
     assert "🧹 Ignore rules:" in result
     assert "- Left  (.gitignore + defaults):" in result
     assert "- Right (defaults):" in result
@@ -139,8 +138,8 @@ async def test_compare_dir_reports_metadata_differences_in_structure_mode():
 
     result = await tool.execute(left_host="l", left_path="/left", right_host="r", right_path="/right")
 
-    assert "- different files: 1 (size/mtime)" in result
-    assert "config.json size(left=120, right=140)" in result
+    assert "SUMMARY only_left=0 only_right=0 type_mismatch=0 different_files=1 diff_mode=size/mtime" in result
+    assert "DIFF_FILE config.json size(left=120, right=140)" in result
     assert "mtime(left=1970-01-01 00:00:10 UTC [10], right=1970-01-01 00:00:22 UTC [22])" in result
 
 
@@ -172,6 +171,6 @@ async def test_compare_dir_compare_content_hash_reports_changed_files():
         compare_content=True,
     )
 
-    assert "mode: content-hash" in result
-    assert "- different files: 1 (checksum)" in result
-    assert "diff.bin checksum(" in result
+    assert "MODE content-hash" in result
+    assert "SUMMARY only_left=0 only_right=0 type_mismatch=0 different_files=1 diff_mode=checksum" in result
+    assert "DIFF_FILE diff.bin checksum(" in result

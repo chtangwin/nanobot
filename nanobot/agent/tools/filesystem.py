@@ -183,7 +183,7 @@ class CompareDirTool(Tool):
         "(local↔remote or remote↔remote).\n"
         "Use this tool when the user asks to compare folders, check deployment drift, "
         "or get added/removed/changed summaries before drilling into files.\n"
-        "Returns summary only (counts + sampled paths). It does NOT return file-level text diffs.\n"
+        "Returns summary only (raw line-based entries + counts). It does NOT return file-level text diffs.\n"
         "Constraints: at least one side must be remote; local↔local is intentionally unsupported "
         "(use local diff tools via exec).\n"
         "Natural language mapping hints:\n"
@@ -542,13 +542,15 @@ class CompareDirTool(Tool):
         only_right = sorted(right_keys - left_keys)
         common = sorted(left_keys & right_keys)
 
-        type_mismatch = []
+        type_mismatch: list[str] = []
         different_files: list[str] = []
         for key in common:
             l = left_entries[key]
             r = right_entries[key]
             if bool(l.get("is_dir")) != bool(r.get("is_dir")):
-                type_mismatch.append(key)
+                left_type = "dir" if l.get("is_dir") else "file"
+                right_type = "dir" if r.get("is_dir") else "file"
+                type_mismatch.append(f"{key} (left={left_type}, right={right_type})")
                 continue
 
             if l.get("is_dir"):
@@ -587,45 +589,30 @@ class CompareDirTool(Tool):
         left_label = f"{left_host}:{left_path}" if left_host else f"local:{left_path}"
         right_label = f"{right_host}:{right_path}" if right_host else f"local:{right_path}"
 
-        def _render_items(items: list[str]) -> str:
-            if not items:
-                return "(none)"
-            return "\n".join(f"  - {x}" for x in items)
-
         lines = [
-            "Directory comparison summary",
-            f"- left: {left_label}",
-            f"- right: {right_label}",
-            f"- recursive: {recursive}",
-            f"- mode: {'content-hash' if compare_content else 'structure-only'}",
+            "COMPARE_DIR v1",
+            f"LEFT {left_label}",
+            f"RIGHT {right_label}",
+            f"RECURSIVE {str(recursive).lower()}",
+            f"MODE {'content-hash' if compare_content else 'structure-only'}",
+            f"LEFT_ENTRIES {left_scan.get('count', 0)}",
+            f"RIGHT_ENTRIES {right_scan.get('count', 0)}",
             "",
-            "Counts:",
-            f"- left entries: {left_scan.get('count', 0)}",
-            f"- right entries: {right_scan.get('count', 0)}",
-            f"- only in left: {len(only_left)}",
-            f"- only in right: {len(only_right)}",
-            f"- type mismatch: {len(type_mismatch)}",
-            f"- different files: {len(different_files)} ({'checksum' if compare_content else 'size/mtime'})",
-            "",
-            "Only in left:",
-            _render_items(only_left),
-            "",
-            "Only in right:",
-            _render_items(only_right),
         ]
 
-        if type_mismatch:
-            lines += [
-                "",
-                "Type mismatch:",
-                _render_items(type_mismatch),
-            ]
+        lines.extend(f"ONLY_LEFT {p}" for p in only_left)
+        lines.extend(f"ONLY_RIGHT {p}" for p in only_right)
+        lines.extend(f"TYPE_MISMATCH {p}" for p in type_mismatch)
+        lines.extend(f"DIFF_FILE {p}" for p in different_files)
 
         lines += [
             "",
-            f"Different files ({'checksum' if compare_content else 'size/mtime'}):",
-            _render_items(different_files),
-            "",
+            "SUMMARY "
+            f"only_left={len(only_left)} "
+            f"only_right={len(only_right)} "
+            f"type_mismatch={len(type_mismatch)} "
+            f"different_files={len(different_files)} "
+            f"diff_mode={'checksum' if compare_content else 'size/mtime'}",
             self._render_ignore_block(left_scan, right_scan, ignore_cfg),
         ]
         return "\n".join(lines)
