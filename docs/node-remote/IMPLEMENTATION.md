@@ -383,6 +383,42 @@ ExecutionBackendRouter.resolve(host)
 结果返回用户
 ```
 
+### LLM 如何“知道并使用”本分支的新能力
+
+这个分支（`feature/remote-node-local`）的远程能力，不是靠硬编码自然语言规则；
+核心是 **Tool Schema + Backend Router + Host lifecycle** 三层协作：
+
+1. **能力暴露给 LLM：Tool definitions**
+   - 在 `AgentLoop._run_agent_loop()` 调用模型时，会传入：
+     - `messages=...`（system/user/history）
+     - `tools=self.tools.get_definitions()`
+   - 这些 definitions 来自每个工具的 `name/description/parameters`。
+
+2. **本分支新增的“可感知信号”**
+   - `ExecTool`/`ReadFileTool`/`WriteFileTool`/`EditFileTool`/`ListDirTool` 参数都支持 `host`。
+   - `HostsTool` 暴露 `list/add/connect/disconnect/status/exec` 动作。
+   - 因此模型会学到两件事：
+     - 远程执行可通过统一工具 + `host` 参数完成。
+     - 主机生命周期由 `hosts` 工具管理。
+
+3. **模型调用后如何落地执行**
+   - 模型只需产出函数调用（如 `exec(host="myserver", command="ls")`）。
+   - `ExecutionBackendRouter.resolve(host)` 决定走本地还是远程。
+   - 远程路径由 `HostManager` + `RemoteExecutionBackend` + `RemoteHost` 处理。
+
+4. **“智能”来自哪里**
+   - **选择层智能**：来自工具描述和参数约束（模型知道何时用 `host`/`hosts`）。
+   - **执行层可靠性**：来自代码实现（transport auto-heal、request_id 幂等、连接复用），不是靠 prompt 猜。
+
+5. **可直接参考的关键代码点**
+   - 工具注册：`nanobot/agent/loop.py` (`_register_default_tools`)
+   - 模型调用携带 tools：`nanobot/agent/loop.py` (`provider.chat(..., tools=...)`)
+   - 远程工具 schema：`nanobot/agent/tools/shell.py`、`nanobot/agent/tools/filesystem.py`、`nanobot/agent/tools/hosts.py`
+   - 路由：`nanobot/agent/backends/router.py`
+   - 连接与协议：`nanobot/remote/manager.py`、`nanobot/remote/connection.py`、`nanobot/remote/remote_server.py`
+
+> 一句话：LLM 负责“选对工具并填对参数”，本分支新类负责“把这次调用可靠地执行出来”。
+
 ## 错误处理
 
 ### 连接错误
