@@ -369,6 +369,19 @@ uv run --with websockets remote_server.py --port 8765 --no-tmux
 - `remote_server.log` — 服务器日志
 - `tmux.sock` — tmux 会话 socket
 
+## 术语约定（对话与参数统一）
+
+为避免歧义，本分支统一术语如下：
+
+- 用户语义：使用 **host/hosts**（中文：**主机**）
+- 工具参数：使用 `host` 与 `hosts action=...`
+- 不再使用：`node` / `nodes` / `节点`
+
+示例：
+- ✅ "在 myserver 这台主机上执行 ls -la"（`exec host="myserver" ...`）
+- ✅ "先列出所有 hosts"（`hosts action="list"`）
+- ❌ "在节点 myserver 上执行..."
+
 ## 与现有工具的集成
 
 ### 工具初始化
