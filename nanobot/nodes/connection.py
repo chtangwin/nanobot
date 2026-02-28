@@ -138,72 +138,83 @@ class RemoteNode:
 
         logger.info(f"Remote node {self.config.name} disconnected")
 
-    async def execute(self, command: str, timeout: float = 30.0) -> dict:
-        """
-        Execute a command on the remote node.
-
-        Args:
-            command: Command to execute.
-            timeout: Maximum time to wait for result.
-
-        Returns:
-            Dictionary with 'success', 'output', and 'error' keys.
-
-        Raises:
-            ConnectionError: If not connected or command fails.
-        """
+    async def _rpc(self, message: dict, timeout: float = 30.0) -> dict:
+        """Send one RPC message to node_server and return normalized result."""
         if not self._running or not self._authenticated:
-            # Try to reconnect
             await self.setup()
 
         try:
-            message = {
-                "type": "execute",
-                "command": command,
-            }
-
             await self.websocket.send(json.dumps(message))
+            response = await asyncio.wait_for(self.websocket.recv(), timeout=timeout)
+            data = json.loads(response)
 
-            # Wait for response
-            response = await asyncio.wait_for(
-                self.websocket.recv(),
-                timeout=timeout
-            )
-
-            result = json.loads(response)
-
-            if result.get("type") == "result":
-                return {
-                    "success": result.get("success", False),
-                    "output": result.get("output"),
-                    "error": result.get("error"),
-                }
-            elif result.get("type") == "error":
-                return {
-                    "success": False,
-                    "output": None,
-                    "error": result.get("message", "Unknown error"),
-                }
-            else:
-                return {
-                    "success": False,
-                    "output": None,
-                    "error": f"Unexpected response type: {result.get('type')}",
-                }
-
+            if data.get("type") == "result":
+                return data
+            if data.get("type") == "error":
+                return {"success": False, "error": data.get("message", "Unknown error")}
+            return {"success": False, "error": f"Unexpected response type: {data.get('type')}"}
         except asyncio.TimeoutError:
-            return {
-                "success": False,
-                "output": None,
-                "error": f"Command timed out after {timeout} seconds",
-            }
+            return {"success": False, "error": f"Command timed out after {timeout} seconds"}
         except Exception as e:
-            logger.error(f"Failed to execute command on {self.config.name}: {e}")
-            return {
-                "success": False,
-                "output": None,
-                "error": str(e),
-            }
+            logger.error(f"RPC failed on {self.config.name}: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def exec(self, command: str, timeout: float = 30.0) -> dict:
+        """Execute a shell command on the remote host."""
+        result = await self._rpc({"type": "exec", "command": command}, timeout=timeout)
+        return {
+            "success": result.get("success", False),
+            "output": result.get("output"),
+            "error": result.get("error"),
+            "exit_code": result.get("exit_code"),
+        }
+
+    async def execute(self, command: str, timeout: float = 30.0) -> dict:
+        """Backward-compatible alias for exec()."""
+        return await self.exec(command, timeout=timeout)
+
+    async def read_file(self, path: str, timeout: float = 30.0) -> dict:
+        result = await self._rpc({"type": "read_file", "path": path}, timeout=timeout)
+        return {
+            "success": result.get("success", False),
+            "content": result.get("content"),
+            "error": result.get("error"),
+        }
+
+    async def write_file(self, path: str, content: str, timeout: float = 30.0) -> dict:
+        result = await self._rpc(
+            {"type": "write_file", "path": path, "content": content},
+            timeout=timeout,
+        )
+        return {
+            "success": result.get("success", False),
+            "bytes": result.get("bytes"),
+            "error": result.get("error"),
+        }
+
+    async def edit_file(self, path: str, old_text: str, new_text: str, timeout: float = 30.0) -> dict:
+        result = await self._rpc(
+            {
+                "type": "edit_file",
+                "path": path,
+                "old_text": old_text,
+                "new_text": new_text,
+            },
+            timeout=timeout,
+        )
+        return {
+            "success": result.get("success", False),
+            "path": result.get("path"),
+            "error": result.get("error"),
+        }
+
+    async def list_dir(self, path: str, timeout: float = 30.0) -> dict:
+        result = await self._rpc({"type": "list_dir", "path": path}, timeout=timeout)
+        return {
+            "success": result.get("success", False),
+            "entries": result.get("entries"),
+            "error": result.get("error"),
+        }
 
     async def _create_ssh_tunnel(self):
         """Create SSH tunnel to remote host."""
