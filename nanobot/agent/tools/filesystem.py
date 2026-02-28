@@ -253,8 +253,6 @@ class CompareDirTool(Tool):
         ".build/**",
         "site-packages/**",
         "*.tsbuildinfo",
-        "*.log",
-        "logs/**",
         ".DS_Store",
         "Thumbs.db",
     ]
