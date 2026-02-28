@@ -571,10 +571,22 @@ class CompareDirTool(Tool):
 class CompareFileTool(Tool):
     name = "compare_file"
     description = (
-        "Compare two files across local/remote endpoints. "
-        "Use when users ask to compare/diff/check whether files are identical. "
-        "Supports binary files via checksum comparison. "
-        "At least one side must be remote (local<->local is intentionally unsupported)."
+        "Compare two files for exact differences across endpoints "
+        "(local↔remote or remote↔remote).\n"
+        "Use this tool when the user asks to diff two files, verify exact equality, "
+        "or validate a release artifact/config across hosts.\n"
+        "At least one side must be remote; local↔local is intentionally unsupported "
+        "(use local diff tooling via exec).\n"
+        "Modes:\n"
+        "- auto: detect text vs binary automatically\n"
+        "- text: unified diff output\n"
+        "- binary: checksum comparison (SHA256), no text diff\n"
+        "Natural language mapping hints:\n"
+        "- 'show line-by-line diff' -> mode=text\n"
+        "- 'ignore whitespace' -> ignore_whitespace=true\n"
+        "- 'case-insensitive compare' -> ignore_case=true\n"
+        "- 'binary/checksum compare' -> mode=binary\n"
+        "- 'keep output short' -> lower max_diff_lines"
     )
     parameters = {
         "type": "object",
