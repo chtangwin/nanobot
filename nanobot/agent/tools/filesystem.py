@@ -193,7 +193,9 @@ class CompareDirTool(Tool):
         "- 'top-level only' -> recursive=false\n"
         "- 'directory is too large, give summary first' -> set/lower max_entries "
         "(entry cap; over-limit returns capped summary).\n"
-        "Ignore-rule provenance is reported in output (user /.gitignore / defaults)."
+        "Ignore-rule provenance is reported in output (user /.gitignore / defaults).\n"
+        "Note: defaults include large generated/cache paths (including site-packages); "
+        "override with explicit ignore_globs when needed."
     )
     parameters = {
         "type": "object",
@@ -229,10 +231,32 @@ class CompareDirTool(Tool):
         ".git/**",
         "node_modules/**",
         ".venv/**",
+        "venv/**",
         "__pycache__/**",
         "*.pyc",
+        ".pytest_cache/**",
+        ".mypy_cache/**",
+        ".ruff_cache/**",
+        ".tox/**",
+        ".nox/**",
+        "dist/**",
+        "build/**",
+        "coverage/**",
+        ".pnpm-store/**",
+        ".npm/**",
+        "._npx/**",
+        ".cache/**",
+        ".next/**",
+        ".gradle/**",
+        ".cxx/**",
+        ".swiftpm/**",
+        ".build/**",
+        "site-packages/**",
+        "*.tsbuildinfo",
         "*.log",
+        "logs/**",
         ".DS_Store",
+        "Thumbs.db",
     ]
 
     def __init__(self, backend_router: ExecutionBackendRouter):
