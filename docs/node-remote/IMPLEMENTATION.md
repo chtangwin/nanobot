@@ -264,21 +264,28 @@ capture loop:
 
 这样不再依赖 `$`/`#` prompt 检测，避免输出中包含 `$`/`#` 时的误解析。
 
-**WebSocket 协议**：
+**WebSocket 协议（结构化 RPC + 幂等 request_id）**：
 ```json
 // 认证
 {"token": "optional-token"}
 → {"type": "authenticated", "message": "..."}
 
-// 执行命令
-{"type": "execute", "command": "ls -la"}
-→ {"type": "result", "success": true, "output": "...", "error": null}
+// 执行命令（request_id 用于重试去重）
+{"request_id": "uuid", "type": "exec", "command": "ls -la"}
+→ {"type": "result", "request_id": "uuid", "success": true, "output": "...", "error": null, "exit_code": 0}
+
+// 文件 RPC
+{"request_id": "uuid", "type": "read_file", "path": "/etc/hosts"}
+{"request_id": "uuid", "type": "write_file", "path": "/tmp/a.txt", "content": "..."}
+{"request_id": "uuid", "type": "edit_file", "path": "...", "old_text": "...", "new_text": "..."}
+{"request_id": "uuid", "type": "list_dir", "path": "/tmp"}
+→ {"type": "result", "request_id": "uuid", ...}
 
 // Ping/pong
 {"type": "ping"}
 → {"type": "pong"}
 
-// 关闭连接（服务器继续运行）
+// 关闭连接（仅当前 WebSocket；服务仍运行）
 {"type": "close"}
 
 // 关闭整个服务器（优雅退出）
@@ -361,16 +368,17 @@ self.tools.register(CompareTool(host_manager=self.host_manager))
     ↓
 LLM 生成工具调用
     ↓
-Tool.execute(command="...", host="server")
+Tool.execute(..., host="server")
     ↓
-工具检查 host 参数
-    ↓
-如果设置了 host：
-    host_manager.execute(command, host)
-    ↓
-RemoteHost.execute(command)
-    ↓
-WebSocket → 远程 → 执行 → 返回
+ExecutionBackendRouter.resolve(host)
+    ├─ host 为空 → LocalExecutionBackend
+    └─ host 非空 → HostManager.get_or_connect(host)
+                    ↓
+                 RemoteExecutionBackend
+                    ↓
+                 RemoteHost._rpc(request_id + structured message)
+                    ↓
+                 WebSocket → remote_server.py → 返回
     ↓
 结果返回用户
 ```
@@ -384,7 +392,9 @@ WebSocket → 远程 → 执行 → 返回
 | SSH 隧道失败 | SSH 不可访问 | 检查 SSH 连接 |
 | WebSocket 超时 | 主机未启动 | 检查远程 Python/uv |
 | 认证失败 | 无效令牌 | 检查令牌配置 |
-| 连接丢失 | 网络问题 | 自动重连 |
+| 连接丢失 | 网络问题 | 传输层自动恢复（重建 tunnel + WS + auth） |
+
+> 约束：自动恢复只做 transport recovery，**不会**隐式 redeploy 或创建新 session。若恢复失败，直接报错给用户。
 
 ### 命令错误
 
@@ -392,7 +402,7 @@ WebSocket → 远程 → 执行 → 返回
 |------|------|----------|
 | 超时 | 长时间运行的命令 | 使用后台模式 |
 | 命令失败 | 无效命令 | 检查命令语法 |
-| 会话丢失 | tmux 崩溃 | 重新连接（重建会话） |
+| 请求重试副作用风险 | 网络中断导致客户端重发 | 使用 request_id 幂等去重（服务端缓存结果） |
 
 ## 测试
 
