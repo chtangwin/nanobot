@@ -28,6 +28,8 @@ import argparse
 import logging
 import time
 import uuid
+import difflib
+from pathlib import Path
 
 try:
     import websockets
@@ -269,20 +271,16 @@ class CommandExecutor:
         else:
             self.tmux = None
 
-    async def execute(self, command: str) -> dict:
-        """Execute a command and return the result."""
+    async def exec(self, command: str) -> dict:
+        """Execute a shell command and return structured result."""
         if self.use_tmux:
             return await self._execute_tmux(command)
-        else:
-            return await self._execute_simple(command)
+        return await self._execute_simple(command)
 
     async def _execute_tmux(self, command: str) -> dict:
-        """Execute command using tmux session with marker-based output capture."""
         try:
             await self.tmux.create()
-
             result = await self.tmux.send_and_capture(command)
-
             exit_code = result["exit_code"]
             return {
                 "success": exit_code == 0,
@@ -299,14 +297,103 @@ class CommandExecutor:
             }
 
     async def _execute_simple(self, command: str) -> dict:
-        """Execute command without tmux."""
         executor = SimpleExecutor()
-        return await executor.execute(command)
+        result = await executor.execute(command)
+        result.setdefault("exit_code", 0 if result.get("success") else 1)
+        return result
 
     def cleanup(self):
-        """Clean up resources."""
         if self.tmux:
             self.tmux.destroy()
+
+
+class FileService:
+    """Structured filesystem RPC operations."""
+
+    @staticmethod
+    async def read_file(path: str) -> dict:
+        try:
+            p = Path(path)
+            if not p.exists():
+                return {"success": False, "error": f"File not found: {path}"}
+            if not p.is_file():
+                return {"success": False, "error": f"Not a file: {path}"}
+            try:
+                content = p.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                content = p.read_bytes().decode("utf-8", errors="replace")
+            return {"success": True, "content": content}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
+    async def write_file(path: str, content: str) -> dict:
+        try:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+            return {"success": True, "bytes": len(content), "path": str(p)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
+    async def edit_file(path: str, old_text: str, new_text: str) -> dict:
+        try:
+            p = Path(path)
+            if not p.exists():
+                return {"success": False, "error": f"File not found: {path}"}
+            if not p.is_file():
+                return {"success": False, "error": f"Not a file: {path}"}
+
+            content = p.read_text(encoding="utf-8")
+            if old_text not in content:
+                lines = content.splitlines(keepends=True)
+                old_lines = old_text.splitlines(keepends=True)
+                window = len(old_lines)
+                best_ratio, best_start = 0.0, 0
+                for i in range(max(1, len(lines) - window + 1)):
+                    ratio = difflib.SequenceMatcher(None, old_lines, lines[i : i + window]).ratio()
+                    if ratio > best_ratio:
+                        best_ratio, best_start = ratio, i
+                if best_ratio > 0.5:
+                    diff = "\n".join(difflib.unified_diff(
+                        old_lines,
+                        lines[best_start : best_start + window],
+                        fromfile="old_text (provided)",
+                        tofile=f"{path} (actual, line {best_start + 1})",
+                        lineterm="",
+                    ))
+                    return {
+                        "success": False,
+                        "error": f"old_text not found in {path}. Best match ({best_ratio:.0%}) at line {best_start + 1}:\n{diff}",
+                    }
+                return {"success": False, "error": f"old_text not found in {path}. No similar text found."}
+
+            count = content.count(old_text)
+            if count > 1:
+                return {"success": False, "error": f"old_text appears {count} times. Please provide more context."}
+
+            p.write_text(content.replace(old_text, new_text, 1), encoding="utf-8")
+            return {"success": True, "path": str(p)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
+    async def list_dir(path: str) -> dict:
+        try:
+            p = Path(path)
+            if not p.exists():
+                return {"success": False, "error": f"Directory not found: {path}"}
+            if not p.is_dir():
+                return {"success": False, "error": f"Not a directory: {path}"}
+
+            entries = [
+                {"name": item.name, "is_dir": item.is_dir()}
+                for item in sorted(p.iterdir())
+            ]
+            return {"success": True, "entries": entries}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 
 async def handle_connection(
@@ -319,10 +406,14 @@ async def handle_connection(
     """Handle WebSocket connection.
 
     Message types:
-        execute  - run a command, returns result
-        ping     - health check, returns pong
-        close    - close this connection (server stays up)
-        shutdown - gracefully shut down the entire server
+        exec      - run a shell command, returns structured result
+        read_file - read file content
+        write_file- write file content
+        edit_file - replace text in file
+        list_dir  - list directory entries
+        ping      - health check, returns pong
+        close     - close this connection (server stays up)
+        shutdown  - gracefully shut down the entire server
     """
     logger.info(f"New connection from {websocket.remote_address}")
 
@@ -362,7 +453,7 @@ async def handle_connection(
                 data = json.loads(message)
                 msg_type = data.get("type")
 
-                if msg_type == "execute":
+                if msg_type in ("exec", "execute"):
                     command = data.get("command")
                     if not command:
                         await websocket.send(json.dumps({
@@ -372,14 +463,55 @@ async def handle_connection(
                         continue
 
                     logger.info(f"Executing: {command[:100]}...")
-                    result = await executor.execute(command)
+                    result = await executor.exec(command)
                     await websocket.send(json.dumps({
                         "type": "result",
                         "command": command,
                         **result
                     }))
 
-                elif msg_type == "ping":
+                elif msg_type == "read_file":
+                    path = data.get("path")
+                    if not path:
+                        await websocket.send(json.dumps({"type": "error", "message": "No path provided"}))
+                        continue
+                    result = await FileService.read_file(path)
+                    await websocket.send(json.dumps({"type": "result", **result}))
+
+                elif msg_type == "write_file":
+                    path = data.get("path")
+                    content = data.get("content")
+                    if not path:
+                        await websocket.send(json.dumps({"type": "error", "message": "No path provided"}))
+                        continue
+                    if content is None:
+                        await websocket.send(json.dumps({"type": "error", "message": "No content provided"}))
+                        continue
+                    result = await FileService.write_file(path, content)
+                    await websocket.send(json.dumps({"type": "result", **result}))
+
+                elif msg_type == "edit_file":
+                    path = data.get("path")
+                    old_text = data.get("old_text")
+                    new_text = data.get("new_text")
+                    if not path:
+                        await websocket.send(json.dumps({"type": "error", "message": "No path provided"}))
+                        continue
+                    if old_text is None or new_text is None:
+                        await websocket.send(json.dumps({"type": "error", "message": "old_text/new_text required"}))
+                        continue
+                    result = await FileService.edit_file(path, old_text, new_text)
+                    await websocket.send(json.dumps({"type": "result", **result}))
+
+                elif msg_type == "list_dir":
+                    path = data.get("path")
+                    if not path:
+                        await websocket.send(json.dumps({"type": "error", "message": "No path provided"}))
+                        continue
+                    result = await FileService.list_dir(path)
+                    await websocket.send(json.dumps({"type": "result", **result}))
+
+                elif msg_type == "ping": 
                     await websocket.send(json.dumps({"type": "pong"}))
 
                 elif msg_type == "close":
