@@ -419,6 +419,71 @@ ExecutionBackendRouter.resolve(host)
 
 > 一句话：LLM 负责“选对工具并填对参数”，本分支新类负责“把这次调用可靠地执行出来”。
 
+### 真实 `provider.chat` payload（脱敏样例）
+
+已在本分支生成一份真实运行时捕获（脱敏后）的样例文件：
+
+- `docs/node-remote/PROVIDER_CHAT_PAYLOAD_SAMPLE.json`
+
+该样例来自真实 `AgentLoop._run_agent_loop()` 首次调用 `provider.chat(...)`，包含：
+- `messages`（system + runtime context + user）
+- `tools`（`self.tools.get_definitions()` 的完整函数定义）
+- `model/max_tokens/temperature`
+
+#### 关键片段 1：`exec` 工具 schema（remote 感知核心）
+
+```json
+{
+  "name": "exec",
+  "description": "Execute a shell command and return its output. For remote hosts ... use the 'host' parameter ...",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "command": {"type": "string"},
+      "working_dir": {"type": "string"},
+      "host": {"type": "string", "description": "Remote host name. If omitted, run locally."}
+    },
+    "required": ["command"]
+  }
+}
+```
+
+#### 关键片段 2：文件工具都支持 `host`
+
+- `read_file(path, host?)`
+- `write_file(path, content, host?)`
+- `edit_file(path, old_text, new_text, host?)`
+- `list_dir(path, host?)`
+
+这使 LLM 能在“同一个工具”上做本地/远程切换，而不是学习两套工具。
+
+#### 关键片段 3：`hosts` 工具负责生命周期
+
+`hosts` 的 schema + description 暴露：
+- `list/add/connect/disconnect/status/exec`
+
+LLM 因此知道：
+- 主机管理动作走 `hosts`
+- 业务动作走 `exec/read_file/...` + `host` 参数
+
+#### 最小可读形态（给 reviewer）
+
+```text
+System:
+- You are nanobot...
+- If a tool call fails, analyze error and retry appropriately...
+
+Tools:
+- hosts(action, name, ssh_host, ...)
+- exec(command, working_dir?, host?)
+- read_file(path, host?)
+- write_file(path, content, host?)
+- edit_file(path, old_text, new_text, host?)
+- list_dir(path, host?)
+```
+
+这就是“LLM 如何知道本分支远程能力”的核心入口。
+
 ## 错误处理
 
 ### 连接错误
