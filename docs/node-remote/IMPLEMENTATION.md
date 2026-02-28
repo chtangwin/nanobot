@@ -187,9 +187,9 @@ self.tools.register(ExecTool(..., node_manager=self.node_manager))
 
 **用法**：
 ```
-nodes action="list"
-nodes action="add" name="server" ssh_host="user@host"
-nodes action="exec" name="server" command="ls -la"
+hosts action="list"
+hosts action="add" name="server" ssh_host="user@host"
+hosts action="exec" name="server" command="ls -la"
 ```
 
 ### 修改的工具
@@ -204,7 +204,7 @@ nodes action="exec" name="server" command="ls -la"
 
 **流程**：
 ```
-execute(command, node=None)
+execute(command, host=None)
   ├─ if node and node_manager:
   │   └─ _execute_remote(command, node)
   │       └─ node_manager.execute(command, node)
@@ -361,7 +361,7 @@ self.tools.register(CompareTool(node_manager=self.node_manager))
     ↓
 LLM 生成工具调用
     ↓
-Tool.execute(command="...", node="server")
+Tool.execute(command="...", host="server")
     ↓
 工具检查 node 参数
     ↓
@@ -538,7 +538,7 @@ class MyTool(Tool):
             props["properties"]["node"] = {...}
         return props
 
-    async def execute(self, param, node=None):
+    async def execute(self, param, host=None):
         if node and self._node_manager:
             return await self._execute_remote(param, node)
         return await self._execute_local(param)

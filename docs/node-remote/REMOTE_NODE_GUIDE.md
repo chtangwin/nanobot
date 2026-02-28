@@ -40,7 +40,7 @@
 你："添加一个名为 'myserver' 的节点，地址是 root@10.0.0.174"
 
 nanobot 调用：
-nodes action="add" name="myserver" ssh_host="root@10.0.0.174"
+hosts action="add" name="myserver" ssh_host="root@10.0.0.174"
 
 响应：✓ 节点 'myserver' 添加成功
 ```
@@ -51,7 +51,7 @@ nodes action="add" name="myserver" ssh_host="root@10.0.0.174"
 你："连接到 myserver"
 
 nanobot 调用：
-nodes action="connect" name="myserver"
+hosts action="connect" name="myserver"
 
 响应：✓ 已连接到 'myserver'（会话：nanobot-a3f2b1c4）
 ```
@@ -62,7 +62,7 @@ nodes action="connect" name="myserver"
 你："在 myserver 上运行 pwd"
 
 nanobot 调用：
-exec command="pwd" node="myserver"
+exec command="pwd" host="myserver"
 
 响应：
 🔧 Tool: exec
@@ -254,10 +254,10 @@ C:\Users\YourName\.ssh\id_rsa
 exec command="ls -la"
 
 # 远程
-exec command="ls -la" node="myserver"
+exec command="ls -la" host="myserver"
 
 # 指定工作目录
-exec command="pytest" node="myserver" working_dir="/app"
+exec command="pytest" host="myserver" working_dir="/app"
 ```
 
 **read_file** - 读取文件
@@ -266,7 +266,7 @@ exec command="pytest" node="myserver" working_dir="/app"
 read_file path="/etc/config.py"
 
 # 远程
-read_file path="/etc/nginx.conf" node="myserver"
+read_file path="/etc/nginx.conf" host="myserver"
 ```
 
 **write_file** - 写入文件
@@ -275,7 +275,7 @@ read_file path="/etc/nginx.conf" node="myserver"
 write_file path="/tmp/test.txt" content="Hello"
 
 # 远程
-write_file path="/app/config.json" node="myserver" content='{"key": "value"}'
+write_file path="/app/config.json" host="myserver" content='{"key": "value"}'
 ```
 
 ---
@@ -289,7 +289,7 @@ write_file path="/app/config.json" node="myserver" content='{"key": "value"}'
 你："检查 myserver 上的磁盘空间"
 
 nanobot：
-1. exec command="df -h" node="myserver"
+1. exec command="df -h" host="myserver"
 
 响应显示磁盘使用情况。
 ```
@@ -299,7 +299,7 @@ nanobot：
 你："myserver 负载如何？"
 
 nanobot：
-exec command="uptime" node="myserver"
+exec command="uptime" host="myserver"
 ```
 
 **查看日志**
@@ -307,7 +307,7 @@ exec command="uptime" node="myserver"
 你："显示 myserver 上 nginx 日志的最后 20 行"
 
 nanobot：
-exec command="tail -20 /var/log/nginx/access.log" node="myserver"
+exec command="tail -20 /var/log/nginx/access.log" host="myserver"
 ```
 
 ### 示例 2：开发工作流
@@ -317,9 +317,9 @@ exec command="tail -20 /var/log/nginx/access.log" node="myserver"
 你："分析 myserver 上 /app 项目的结构"
 
 nanobot：
-1. exec command="find /app -name '*.py' \| head -20" node="myserver"
-2. read_file path="/app/main.py" node="myserver"
-3. read_file path="/app/utils.py" node="myserver"
+1. exec command="find /app -name '*.py' \| head -20" host="myserver"
+2. read_file path="/app/main.py" host="myserver"
+3. read_file path="/app/utils.py" host="myserver"
 4. [分析和总结代码结构]
 ```
 
@@ -328,7 +328,7 @@ nanobot：
 你："在 myserver 上运行完整测试套件"
 
 nanobot：
-exec command="cd /app && pytest -v" node="myserver"
+exec command="cd /app && pytest -v" host="myserver"
 
 显示测试结果。
 ```
@@ -338,10 +338,10 @@ exec command="cd /app && pytest -v" node="myserver"
 你："在 myserver 上拉取最新代码"
 
 nanobot：
-exec command="cd /app && git pull" node="myserver"
+exec command="cd /app && git pull" host="myserver"
 
 你："查看 git 状态"
-exec command="cd /app && git status" node="myserver"
+exec command="cd /app && git status" host="myserver"
 ```
 
 ### 示例 3：部署流程
@@ -351,10 +351,10 @@ exec command="cd /app && git status" node="myserver"
 你："部署到 prod-server"
 
 nanobot 自动执行：
-1. exec command="cd /app && git pull origin main" node="prod-server"
-2. exec command="cd /app && npm install" node="prod-server"
-3. exec command="pm2 restart myapp" node="prod-server"
-4. exec command="pm2 status myapp" node="prod-server"
+1. exec command="cd /app && git pull origin main" host="prod-server"
+2. exec command="cd /app && npm install" host="prod-server"
+3. exec command="pm2 restart myapp" host="prod-server"
+4. exec command="pm2 status myapp" host="prod-server"
 
 30 秒完成部署！
 ```
@@ -364,8 +364,8 @@ nanobot 自动执行：
 你："重启 myserver 上的服务，零停机"
 
 nanobot：
-1. exec command="systemctl reload nginx" node="myserver"
-2. exec command="systemctl status nginx" node="myserver"
+1. exec command="systemctl reload nginx" host="myserver"
+2. exec command="systemctl status nginx" host="myserver"
 ```
 
 ### 示例 4：会话保持
@@ -374,14 +374,14 @@ tmux 会保持你的工作目录和上下文：
 
 ```
 你："在 myserver 上 cd 到 /app"
-→ exec command="cd /app" node="myserver"
+→ exec command="cd /app" host="myserver"
 
 你："列出文件"（10分钟后）
-→ exec command="ls" node="myserver"
+→ exec command="ls" host="myserver"
 → [显示 /app 中的文件，会话保持！]
 
 你："检查 git 状态"
-→ exec command="git status" node="myserver"
+→ exec command="git status" host="myserver"
 → [仍在 /app 目录中]
 ```
 
@@ -392,9 +392,9 @@ tmux 会保持你的工作目录和上下文：
 你："在所有服务器上检查磁盘空间"
 
 nanobot：
-1. exec command="df -h" node="server1"
-2. exec command="df -h" node="server2"
-3. exec command="df -h" node="server3"
+1. exec command="df -h" host="server1"
+2. exec command="df -h" host="server2"
+3. exec command="df -h" host="server3"
 
 汇总所有结果。
 ```
@@ -404,9 +404,9 @@ nanobot：
 你："部署到所有生产服务器"
 
 nanobot：
-1. exec command="cd /app && git pull" node="prod1"
-2. exec command="cd /app && git pull" node="prod2"
-3. exec command="cd /app && git pull" node="prod3"
+1. exec command="cd /app && git pull" host="prod1"
+2. exec command="cd /app && git pull" host="prod2"
+3. exec command="cd /app && git pull" host="prod3"
 
 确认所有服务器都已更新。
 ```
@@ -418,7 +418,7 @@ nanobot：
 你："查看 myserver 上的 nginx 配置"
 
 nanobot：
-read_file path="/etc/nginx/nginx.conf" node="myserver"
+read_file path="/etc/nginx/nginx.conf" host="myserver"
 
 显示配置内容。
 ```
@@ -428,10 +428,10 @@ read_file path="/etc/nginx/nginx.conf" node="myserver"
 你："更新 myserver 上的应用配置"
 
 nanobot：
-1. read_file path="/app/config.json" node="myserver"
+1. read_file path="/app/config.json" host="myserver"
 2. [修改配置]
-3. write_file path="/app/config.json" node="myserver" content="{...}"
-4. exec command="systemctl restart myapp" node="myserver"
+3. write_file path="/app/config.json" host="myserver" content="{...}"
+4. exec command="systemctl restart myapp" host="myserver"
 ```
 
 **创建部署脚本**
@@ -439,8 +439,8 @@ nanobot：
 你："在 myserver 上创建部署脚本"
 
 nanobot：
-write_file path="/app/deploy.sh" node="myserver" content="#!/bin/bash\ngit pull\nnpm install\npm run build\npm restart"
-exec command="chmod +x /app/deploy.sh" node="myserver"
+write_file path="/app/deploy.sh" host="myserver" content="#!/bin/bash\ngit pull\nnpm install\npm run build\npm restart"
+exec command="chmod +x /app/deploy.sh" host="myserver"
 ```
 
 ---
@@ -479,27 +479,27 @@ exec command="chmod +x /app/deploy.sh" node="myserver"
 
 **基本配置**
 ```
-nodes action="add" name="myserver" ssh_host="root@10.0.0.174"
+hosts action="add" name="myserver" ssh_host="root@10.0.0.174"
 ```
 
 **使用 SSH 密钥**
 ```
-nodes action="add" name="myserver" ssh_host="root@host" ssh_key_path="~/.ssh/id_rsa"
+hosts action="add" name="myserver" ssh_host="root@host" ssh_key_path="~/.ssh/id_rsa"
 ```
 
 **自定义端口**
 ```
-nodes action="add" name="myserver" ssh_host="root@host" ssh_port=2222
+hosts action="add" name="myserver" ssh_host="root@host" ssh_port=2222
 ```
 
 **指定工作区**
 ```
-nodes action="add" name="myserver" ssh_host="root@host" workspace="/app"
+hosts action="add" name="myserver" ssh_host="root@host" workspace="/app"
 ```
 
 **完整配置**
 ```
-nodes action="add" \
+hosts action="add" \
   name="myserver" \
   ssh_host="root@10.0.0.174" \
   ssh_port=22 \
@@ -548,7 +548,7 @@ execute command
 
 **带工作目录**：
 ```
-1. exec command="ls" node="myserver" working_dir="/var/log"
+1. exec command="ls" host="myserver" working_dir="/var/log"
 2. nanobot → WebSocket: {"type": "execute", "command": "cd /var/log && ls"}
 3. 远程：tmux send-keys 发送带唯一 marker 的 wrapped command
 4. 远程：轮询 capture-pane，直到出现 END marker
@@ -595,36 +595,36 @@ teardown()
 
 **启动长时间运行的服务**
 ```
-exec command="cd /app && nohup npm run dev > /tmp/dev.log 2>&1 &" node="myserver"
+exec command="cd /app && nohup npm run dev > /tmp/dev.log 2>&1 &" host="myserver"
 ```
 
 **查看后台任务日志**
 ```
-exec command="tail -f /tmp/dev.log" node="myserver"
+exec command="tail -f /tmp/dev.log" host="myserver"
 ```
 
 ### 管道和重定向
 
 **组合命令**
 ```
-exec command="ps aux \| grep nginx \| grep -v grep" node="myserver"
+exec command="ps aux \| grep nginx \| grep -v grep" host="myserver"
 ```
 
 **保存输出**
 ```
-exec command="df -h > /tmp/disk.txt" node="myserver"
+exec command="df -h > /tmp/disk.txt" host="myserver"
 ```
 
 ### 多命令序列
 
 **使用 &&**
 ```
-exec command="cd /app && git pull && npm install && npm run build" node="myserver"
+exec command="cd /app && git pull && npm install && npm run build" host="myserver"
 ```
 
 **使用 ;**
 ```
-exec command="cd /app; git pull; npm install" node="myserver"
+exec command="cd /app; git pull; npm install" host="myserver"
 ```
 
 ### Subagent 上下文
@@ -633,10 +633,10 @@ exec command="cd /app; git pull; npm install" node="myserver"
 ```
 你："分析 myserver 上 /app 的代码"
 
-nanobot 生成一个带有 node="myserver" 上下文的 subagent，它可以：
-- exec(command, node="myserver")
-- read_file(path, node="myserver")
-- write_file(path, content, node="myserver")
+nanobot 生成一个带有 host="myserver" 上下文的 subagent，它可以：
+- exec(command, host="myserver")
+- read_file(path, host="myserver")
+- write_file(path, content, host="myserver")
 
 所有操作都自动在 myserver 上执行！
 ```
@@ -648,9 +648,9 @@ nanobot 生成一个带有 node="myserver" 上下文的 subagent，它可以：
 你："更新所有生产服务器"
 
 nanobot 会为每个服务器执行：
-exec command="cd /app && git pull" node="prod1"
-exec command="cd /app && git pull" node="prod2"
-exec command="cd /app && git pull" node="prod3"
+exec command="cd /app && git pull" host="prod1"
+exec command="cd /app && git pull" host="prod2"
+exec command="cd /app && git pull" host="prod3"
 ```
 
 ---
@@ -689,10 +689,10 @@ ssh root@10.0.0.174 "curl -LsSf https://astral.sh/uv/install.sh | sh"
 **解决方案**：
 ```bash
 # 使用后台模式
-exec command="nohup long-running-task &" node="myserver"
+exec command="nohup long-running-task &" host="myserver"
 
 # 或使用 screen/tmux
-exec command="screen -dm -S task long-running-command" node="myserver"
+exec command="screen -dm -S task long-running-command" host="myserver"
 ```
 
 ### 会话丢失
@@ -705,7 +705,7 @@ cd 命令没有保持
 **解决方案**：
 ```bash
 # 重新连接
-nodes action="connect" name="myserver"
+hosts action="connect" name="myserver"
 
 # 会话将被重新创建
 ```
@@ -723,7 +723,7 @@ Permission denied (publickey)
 ssh -i ~/.ssh/id_rsa root@10.0.0.174
 
 # 或在添加节点时指定密钥
-nodes action="add" name="myserver" ssh_host="root@host" ssh_key_path="~/.ssh/id_rsa"
+hosts action="add" name="myserver" ssh_host="root@host" ssh_key_path="~/.ssh/id_rsa"
 ```
 
 ### 找不到命令
@@ -736,10 +736,10 @@ command not found
 **解决方案**：
 ```bash
 # 使用绝对路径
-exec command="/usr/bin/python3 script.py" node="myserver"
+exec command="/usr/bin/python3 script.py" host="myserver"
 
 # 或检查 PATH
-exec command="echo \$PATH" node="myserver"
+exec command="echo \$PATH" host="myserver"
 ```
 
 ### 远程日志调试
@@ -777,7 +777,7 @@ ps -p $(cat /tmp/nanobot-xxx/server.pid)
 
 为每个节点配置默认工作目录：
 ```
-nodes action="add" name="build-server" ssh_host="user@host" workspace="/app"
+hosts action="add" name="build-server" ssh_host="user@host" workspace="/app"
 ```
 
 ### 3. 使用 SSH 密钥
@@ -792,21 +792,21 @@ ssh-copy-id user@host
 
 释放资源：
 ```
-nodes action="disconnect" name="myserver"
+hosts action="disconnect" name="myserver"
 ```
 
 ### 5. 测试关键操作
 
 在运行关键命令前先测试：
 ```
-exec command="echo test" node="myserver"
+exec command="echo test" host="myserver"
 ```
 
 ### 6. 保留本地备份
 
 在修改远程文件前保留备份：
 ```
-read_file path="/app/config.json" node="myserver"
+read_file path="/app/config.json" host="myserver"
 [保存到本地]
 ```
 
@@ -814,14 +814,14 @@ read_file path="/app/config.json" node="myserver"
 
 部署前检查 git 状态：
 ```
-exec command="cd /app && git status" node="myserver"
+exec command="cd /app && git status" host="myserver"
 ```
 
 ### 8. 监控后台任务
 
 启动后台任务时保存日志：
 ```
-exec command="nohup command > /tmp/task.log 2>&1 &" node="myserver"
+exec command="nohup command > /tmp/task.log 2>&1 &" host="myserver"
 ```
 
 ---
