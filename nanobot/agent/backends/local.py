@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.backends.base import ExecutionBackend
-from nanobot.agent.tools.redaction import is_sensitive_path
 
 
 class LocalExecutionBackend(ExecutionBackend):
@@ -17,12 +16,10 @@ class LocalExecutionBackend(ExecutionBackend):
         self,
         workspace: Path | None = None,
         allowed_dir: Path | None = None,
-        block_sensitive_files: bool = True,
         path_append: str = "",
     ):
         self.workspace = workspace
         self.allowed_dir = allowed_dir
-        self.block_sensitive_files = block_sensitive_files
         self.path_append = path_append
 
     def _resolve_path(self, path: str) -> Path:
@@ -31,8 +28,6 @@ class LocalExecutionBackend(ExecutionBackend):
             p = self.workspace / p
         resolved = p.resolve()
 
-        if self.block_sensitive_files and is_sensitive_path(resolved):
-            raise PermissionError(f"Access to sensitive path is blocked by redaction policy: {path}")
 
         if self.allowed_dir:
             try:

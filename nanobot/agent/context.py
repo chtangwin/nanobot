@@ -10,7 +10,7 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-from nanobot.agent.tools.redaction import redact_content, redact_messages
+from nanobot.agent.tools.redaction import redact_content, redact_text
 
 
 class ContextBuilder:
@@ -19,12 +19,10 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     
-    def __init__(self, workspace: Path, redact_tool_outputs: bool = True, redact_context: bool = True):
+    def __init__(self, workspace: Path):
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
-        self.redact_tool_outputs = redact_tool_outputs
-        self.redact_context = redact_context
     
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
@@ -36,6 +34,7 @@ class ContextBuilder:
 
         memory = self.memory.get_memory_context()
         if memory:
+            memory = redact_text(memory)
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
@@ -122,14 +121,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             {"role": "user", "content": self._build_user_content(current_message, media)},
         ]
         
-        # Layer 3: redact sensitive data before sending to LLM
-        if self.redact_context:
-            messages = redact_messages(messages)
         
         return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
+        text = redact_text(text) if isinstance(text, str) else text
         if not media:
             return text
         
@@ -150,10 +147,9 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         self, messages: list[dict[str, Any]],
         tool_call_id: str, tool_name: str, result: str,
     ) -> list[dict[str, Any]]:
-        """Add a tool result to the message list, with optional redaction."""
-        # Layer 2: redact sensitive data from tool outputs
-        if self.redact_tool_outputs:
-            result = redact_content(result) if isinstance(result, str) else result
+        """Add a tool result to the message list, with redaction."""
+        # Redact sensitive data from tool outputs
+        result = redact_content(result) if isinstance(result, str) else result
         messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
         return messages
     
@@ -162,6 +158,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         content: str | None,
         tool_calls: list[dict[str, Any]] | None = None,
         reasoning_content: str | None = None,
+        thinking_blocks: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Add an assistant message to the message list."""
         msg: dict[str, Any] = {"role": "assistant", "content": content}
