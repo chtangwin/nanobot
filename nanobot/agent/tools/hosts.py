@@ -80,6 +80,10 @@ Examples:
                     "type": "string",
                     "description": "Command to execute (for exec)",
                 },
+                "confirm": {
+                    "type": "boolean",
+                    "description": "Set true ONLY when user explicitly asked to disconnect. Never set on your own.",
+                },
                 "timeout": {
                     "type": "number",
                     "description": "Command timeout in seconds (default: 30, for exec)",
@@ -107,6 +111,8 @@ Examples:
             if action == "connect":
                 return await self._connect_host(name=kwargs.get("name"))
             if action == "disconnect":
+                if not kwargs.get("confirm"):
+                    return "⚠️ This will TEARDOWN the remote session (kill remote_server, tmux, delete /tmp/nanobot-*). Ask the user to confirm before proceeding."
                 return await self._disconnect_host(name=kwargs.get("name"))
             if action == "status":
                 return await self._host_status(name=kwargs.get("name"))
