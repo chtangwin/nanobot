@@ -400,6 +400,3 @@ class CompareFileTool(Tool):
 
         return "Text files differ:\n" + "\n".join(diff)
 
-
-# Backward compatibility for imports in older modules
-CompareTool = CompareFileTool

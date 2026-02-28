@@ -93,6 +93,23 @@ async def test_compare_file_binary_uses_checksum_match():
 
 
 @pytest.mark.asyncio
+async def test_compare_file_binary_uses_checksum_mismatch():
+    local = FakeBackend(bytes_map={"/pkg.bin": b"\x00\x01\x02"})
+    remote = FakeBackend(bytes_map={"/pkg.bin": b"\x00\x01\x03"})
+    router = FakeRouter(local_backend=local, remote_backends={"prod": remote})
+    tool = CompareFileTool(router)
+
+    result = await tool.execute(
+        left_path="/pkg.bin",
+        right_path="/pkg.bin",
+        right_host="prod",
+    )
+
+    assert "Binary files differ" in result
+    assert "sha256=" in result
+
+
+@pytest.mark.asyncio
 async def test_compare_file_legacy_params_supported():
     local = FakeBackend(bytes_map={"/local.txt": b"same"})
     remote = FakeBackend(bytes_map={"/remote.txt": b"same"})
