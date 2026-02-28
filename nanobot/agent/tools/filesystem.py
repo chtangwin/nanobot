@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+from datetime import datetime, timezone
 from typing import Any
 
 from nanobot.agent.backends.router import ExecutionBackendRouter
@@ -573,7 +574,12 @@ class CompareDirTool(Tool):
             left_mtime = l.get("mtime")
             right_mtime = r.get("mtime")
             if left_mtime is not None and right_mtime is not None and left_mtime != right_mtime:
-                details.append(f"mtime(left={left_mtime}, right={right_mtime})")
+                details.append(
+                    "mtime("
+                    f"left={self._format_mtime(left_mtime)} [{left_mtime}], "
+                    f"right={self._format_mtime(right_mtime)} [{right_mtime}]"
+                    ")"
+                )
 
             if details:
                 different_files.append(f"{key} {' '.join(details)}")
@@ -623,6 +629,13 @@ class CompareDirTool(Tool):
             self._render_ignore_block(left_scan, right_scan, ignore_cfg),
         ]
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_mtime(ts: Any) -> str:
+        try:
+            return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        except Exception:
+            return str(ts)
 
     @staticmethod
     def _render_ignore_block(

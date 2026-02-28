@@ -140,7 +140,8 @@ async def test_compare_dir_reports_metadata_differences_in_structure_mode():
     result = await tool.execute(left_host="l", left_path="/left", right_host="r", right_path="/right")
 
     assert "- different files: 1 (size/mtime)" in result
-    assert "config.json size(left=120, right=140) mtime(left=10, right=22)" in result
+    assert "config.json size(left=120, right=140)" in result
+    assert "mtime(left=1970-01-01 00:00:10 UTC [10], right=1970-01-01 00:00:22 UTC [22])" in result
 
 
 @pytest.mark.asyncio
