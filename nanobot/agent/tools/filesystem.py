@@ -590,6 +590,7 @@ class CompareDirTool(Tool):
         right_label = f"{right_host}:{right_path}" if right_host else f"local:{right_path}"
 
         lines = [
+            "[FULL DIFF]",
             "COMPARE_DIR v1",
             f"LEFT {left_label}",
             f"RIGHT {right_label}",
@@ -636,6 +637,7 @@ class CompareDirTool(Tool):
         right_ignored = right_scan.get("ignored_count", 0)
         status_line = "⚠️ Asymmetric ignore rules applied" if ignore_cfg.get("asymmetric") else "✅ Symmetric ignore rules"
         return (
+            "[IMPORTANT - SHOW TO USER]",
             "🧹 Ignore rules:\n"
             f"- Left  ({left_source}): {left_ignored} entries ignored\n"
             f"- Right ({right_source}): {right_ignored} entries ignored\n"
