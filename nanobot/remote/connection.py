@@ -1,4 +1,4 @@
-"""Remote node connection implementation."""
+"""Remote host connection implementation."""
 
 import asyncio
 import json
@@ -16,29 +16,29 @@ except ImportError:
     websockets = None
     ConnectionClosed = Exception
 
-from nanobot.nodes.config import NodeConfig
+from nanobot.remote.config import HostConfig
 
 logger = logging.getLogger(__name__)
 
-# Paths to files that get uploaded to the remote node
+# Paths to files that get uploaded to the remote host
 _MODULE_DIR = Path(__file__).parent
-_NODE_SCRIPT_PATH = _MODULE_DIR / "node_server.py"
+_REMOTE_SERVER_PATH = _MODULE_DIR / "remote_server.py"
 _DEPLOY_SCRIPT_PATH = _MODULE_DIR / "deploy.sh"
 
 # Validate at import time
-for _p in (_NODE_SCRIPT_PATH, _DEPLOY_SCRIPT_PATH):
+for _p in (_REMOTE_SERVER_PATH, _DEPLOY_SCRIPT_PATH):
     if not _p.exists():
         logger.warning(f"Required file not found: {_p}")
 
-class RemoteNode:
+class RemoteHost:
     """
-    Remote node connection.
+    Remote host connection.
 
     Manages SSH tunnel, WebSocket connection, and command execution
     on a remote server.
     """
 
-    def __init__(self, config: NodeConfig):
+    def __init__(self, config: HostConfig):
         self.config = config
         self.session_id: Optional[str] = None
         self.tunnel_process: Optional[asyncio.subprocess.Process] = None
@@ -48,12 +48,12 @@ class RemoteNode:
 
     @property
     def is_connected(self) -> bool:
-        """Check if the node is connected."""
+        """Check if the host is connected."""
         return self._running and self._authenticated
 
     async def setup(self) -> str:
         """
-        Establish connection to remote node.
+        Establish connection to remote host.
 
         Returns:
             Session ID for this connection.
@@ -76,8 +76,8 @@ class RemoteNode:
             # Create SSH tunnel
             await self._create_ssh_tunnel()
 
-            # Deploy and start node (single operation)
-            await self._deploy_and_start_node()
+            # Deploy and start host service (single operation)
+            await self._deploy_and_start_host()
 
             # Connect WebSocket
             await self._connect_websocket()
@@ -86,15 +86,15 @@ class RemoteNode:
             await self._authenticate()
 
             self._running = True
-            logger.info(f"Remote node {self.config.name} connected (session: {self.session_id})")
+            logger.info(f"Remote host {self.config.name} connected (session: {self.session_id})")
             return self.session_id
 
         except Exception as e:
-            logger.error(f"Failed to setup remote node {self.config.name}: {e}")
+            logger.error(f"Failed to setup remote host {self.config.name}: {e}")
             # Try to get remote logs for debugging
             try:
                 remote_log = await self._get_remote_log()
-                logger.error(f"Remote node log:\n{remote_log}")
+                logger.error(f"Remote host log:\n{remote_log}")
             except Exception:
                 pass
             await self.teardown()
@@ -104,7 +104,7 @@ class RemoteNode:
         """Clean up all resources.
 
         Shutdown sequence:
-        1. Send ``shutdown`` via WebSocket → node_server exits gracefully
+        1. Send ``shutdown`` via WebSocket → remote_server exits gracefully
            (cleans up tmux, closes WebSocket server, process exits)
         2. If shutdown didn't work, fall back to SSH-based kill
         3. Close the local SSH tunnel
@@ -119,9 +119,9 @@ class RemoteNode:
         # Step 2: If graceful shutdown failed, force-stop via SSH
         if not server_stopped:
             try:
-                await self._force_stop_node()
+                await self._force_stop_host()
             except Exception as e:
-                logger.warning(f"Failed to force-stop remote node: {e}")
+                logger.warning(f"Failed to force-stop remote host: {e}")
 
         # Step 3: Clean up remote session directory
         if self.session_id:
@@ -136,10 +136,10 @@ class RemoteNode:
         except Exception as e:
             logger.warning(f"Failed to close SSH tunnel: {e}")
 
-        logger.info(f"Remote node {self.config.name} disconnected")
+        logger.info(f"Remote host {self.config.name} disconnected")
 
     async def _rpc(self, message: dict, timeout: float = 30.0) -> dict:
-        """Send one RPC message to node_server and return normalized result."""
+        """Send one RPC message to remote_server and return normalized result."""
         if not self._running or not self._authenticated:
             await self.setup()
 
@@ -271,16 +271,16 @@ class RemoteNode:
             finally:
                 self.tunnel_process = None
 
-    async def _deploy_and_start_node(self):
-        """Deploy files and start node on remote server using deploy.sh.
+    async def _deploy_and_start_host(self):
+        """Deploy files and start remote service on host using deploy.sh.
 
         Stages:
-        1. Prepare a local staging directory (node_server.py + deploy.sh)
+        1. Prepare a local staging directory (remote_server.py + deploy.sh)
         2. Create remote session directory
         3. Upload everything in a single ``scp -r`` call
         4. Execute ``deploy.sh`` with port/token/tmux args on remote
         """
-        for path, name in [(_NODE_SCRIPT_PATH, "node_server.py"), (_DEPLOY_SCRIPT_PATH, "deploy.sh")]:
+        for path, name in [(_REMOTE_SERVER_PATH, "remote_server.py"), (_DEPLOY_SCRIPT_PATH, "deploy.sh")]:
             if not path.exists():
                 raise RuntimeError(f"{name} not found at {path}")
 
@@ -289,7 +289,7 @@ class RemoteNode:
         # -- 1. Stage files locally ------------------------------------------
         with tempfile.TemporaryDirectory() as staging:
             staging_path = Path(staging)
-            shutil.copy2(_NODE_SCRIPT_PATH, staging_path / "node_server.py")
+            shutil.copy2(_REMOTE_SERVER_PATH, staging_path / "remote_server.py")
             shutil.copy2(_DEPLOY_SCRIPT_PATH, staging_path / "deploy.sh")
 
             logger.info(
@@ -351,11 +351,11 @@ class RemoteNode:
             raise RuntimeError(f"scp upload failed: {error_msg}")
 
     async def _get_remote_log(self, tail_lines: int = 50) -> str:
-        """Get remote node server log."""
+        """Get remote host server log."""
         if not self.session_id:
             return "No session ID"
 
-        log_file = f"/tmp/{self.session_id}/node_server.log"
+        log_file = f"/tmp/{self.session_id}/remote_server.log"
 
         try:
             result = await self._ssh_exec(f"tail -{tail_lines} {log_file} 2>/dev/null || echo 'Log file not found'")
@@ -364,7 +364,7 @@ class RemoteNode:
             return f"Failed to get log: {e}"
 
     async def _request_shutdown(self) -> bool:
-        """Ask node_server to shut itself down via WebSocket.
+        """Ask remote_server to shut itself down via WebSocket.
 
         Returns True if the server acknowledged the shutdown.
         """
@@ -402,8 +402,8 @@ class RemoteNode:
                     pass
                 self.websocket = None
 
-    async def _force_stop_node(self):
-        """Force-stop the remote node via SSH. Fallback when graceful shutdown fails."""
+    async def _force_stop_host(self):
+        """Force-stop the remote host via SSH. Fallback when graceful shutdown fails."""
         if not self.session_id:
             return
 
@@ -411,7 +411,7 @@ class RemoteNode:
         pid_file = f"{remote_dir}/server.pid"
         tmux_sock = f"{remote_dir}/tmux.sock"
 
-        logger.info(f"Force-stopping node for session {self.session_id}")
+        logger.info(f"Force-stopping host for session {self.session_id}")
 
         # 1. SIGTERM via PID file, wait, then SIGKILL if needed
         await self._ssh_exec(
@@ -433,7 +433,7 @@ class RemoteNode:
         )
 
     async def _connect_websocket(self):
-        """Connect to remote node via WebSocket."""
+        """Connect to remote host via WebSocket."""
         ws_url = f"ws://127.0.0.1:{self.config.local_port}"
 
         logger.info(f"Connecting to WebSocket: {ws_url}")
@@ -449,7 +449,7 @@ class RemoteNode:
             raise ConnectionError(f"WebSocket connection failed: {e}")
 
     async def _authenticate(self):
-        """Authenticate with the remote node."""
+        """Authenticate with the remote host."""
         # Send authentication message (with or without token)
         auth_message = {
             "token": self.config.auth_token if self.config.auth_token else "",

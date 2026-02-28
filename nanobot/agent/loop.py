@@ -18,15 +18,15 @@ from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import CompareTool, EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.nodes import LegacyNodesTool, NodesTool
+from nanobot.agent.tools.hosts import HostsTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.nodes.config import NodesConfig
-from nanobot.nodes.manager import NodeManager
+from nanobot.remote.config import HostsConfig
+from nanobot.remote.manager import HostManager
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
@@ -94,9 +94,9 @@ class AgentLoop:
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         
-        # Initialize NodeManager for remote host support (connection lifecycle only)
-        nodes_config = NodesConfig.load(NodesConfig.get_default_config_path())
-        self.node_manager = NodeManager(nodes_config)
+        # Initialize HostManager for remote host connection lifecycle
+        hosts_config = HostsConfig.load(HostsConfig.get_default_config_path())
+        self.host_manager = HostManager(hosts_config)
 
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         self.backend_router = ExecutionBackendRouter(
@@ -106,7 +106,7 @@ class AgentLoop:
                 block_sensitive_files=self.block_sensitive_files,
                 path_append=self.exec_config.path_append,
             ),
-            node_manager=self.node_manager,
+            host_manager=self.host_manager,
         )
         
         self.subagents = SubagentManager(
@@ -155,8 +155,7 @@ class AgentLoop:
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
-        self.tools.register(NodesTool(node_manager=self.node_manager))
-        self.tools.register(LegacyNodesTool(node_manager=self.node_manager))
+        self.tools.register(HostsTool(host_manager=self.host_manager))
         self.tools.register(CompareTool(self.backend_router))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))

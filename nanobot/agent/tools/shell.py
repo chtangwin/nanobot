@@ -83,7 +83,7 @@ class ExecTool(Tool):
             backend = await self.backend_router.resolve(host)
             result = await backend.exec(command, working_dir=cwd, timeout=self.timeout)
         except KeyError:
-            return f"Error: Host '{host}' not found. Use 'nodes action=\"add\"' to add it first"
+            return f"Error: Host '{host}' not found. Use 'hosts action=\"add\"' to add it first"
         except Exception as e:
             return f"Error executing command: {e}"
 

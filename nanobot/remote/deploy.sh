@@ -1,9 +1,9 @@
 #!/bin/bash
-# nanobot remote node deploy script
-# Uploaded to the remote server and executed there.
+# nanobot remote host deploy script
+# Uploaded to the remote host and executed there.
 #
 # The session directory (SCRIPT_DIR) contains:
-#   - node_server.py   (the WebSocket server)
+#   - remote_server.py  (the WebSocket server)
 #   - deploy.sh         (this script)
 #
 # All runtime files (PID, log, tmux socket) are written to SCRIPT_DIR
@@ -15,7 +15,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOG="$SCRIPT_DIR/node_server.log"
+LOG="$SCRIPT_DIR/remote_server.log"
 PID_FILE="$SCRIPT_DIR/server.pid"
 
 # ── Parse arguments ─────────────────────────────────────────────────
@@ -89,9 +89,9 @@ if [ "$USE_TMUX" -eq 0 ]; then
 fi
 
 # ── Start the server (detached) ─────────────────────────────────────
-echo "Starting node_server.py..."
+echo "Starting remote_server.py..."
 cd "$SCRIPT_DIR"
-setsid uv run --with websockets node_server.py $SERVER_ARGS > "$LOG" 2>&1 &
+setsid uv run --with websockets remote_server.py $SERVER_ARGS > "$LOG" 2>&1 &
 SERVER_PID=$!
 echo "$SERVER_PID" > "$PID_FILE"
 # Disown so the process survives SSH session close

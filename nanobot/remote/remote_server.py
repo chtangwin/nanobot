@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""nanobot node_server: Remote execution server for nanobot.
+"""nanobot remote_server: Remote execution server for nanobot.
 
 This script runs on remote servers and provides command execution
 capabilities through WebSocket communication.
 
 Usage:
     # Direct execution with command line args
-    uv run --with websockets node_server.py --port 8765 --token secret
+    uv run --with websockets remote_server.py --port 8765 --token secret
 
     # Using config file (recommended for automated deployment)
-    uv run --with websockets node_server.py --config /path/to/config.json
+    uv run --with websockets remote_server.py --config /path/to/config.json
 
 Options:
     --config PATH         Path to JSON config file
@@ -36,7 +36,7 @@ try:
 except ImportError:
     print("Error: websockets package not found.")
     print("Install with: pip install websockets")
-    print("Or run with: uv run --with websockets node_server.py")
+    print("Or run with: uv run --with websockets remote_server.py")
     sys.exit(1)
 
 # Configuration defaults
@@ -554,7 +554,7 @@ async def handle_connection(
 
 async def main():
     """Start the WebSocket server."""
-    parser = argparse.ArgumentParser(description="nanobot remote node")
+    parser = argparse.ArgumentParser(description="nanobot remote host")
     parser.add_argument(
         "--config",
         type=str,
@@ -616,7 +616,7 @@ async def main():
         token = args.token
         use_tmux = not args.no_tmux
 
-    logger.info(f"Starting node_server on port {port}")
+    logger.info(f"Starting remote_server on port {port}")
     if token:
         logger.info("Authentication token enabled")
     if not use_tmux:
@@ -650,7 +650,7 @@ async def main():
         logger.info(f"Server listening on ws://0.0.0.0:{port}")
         await stop_event.wait()
 
-    logger.info("node_server stopped")
+    logger.info("remote_server stopped")
 
 
 if __name__ == "__main__":

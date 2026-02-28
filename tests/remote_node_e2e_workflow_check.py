@@ -11,8 +11,8 @@ Tests the full lifecycle:
 import asyncio
 import logging
 import time
-from nanobot.nodes.config import NodesConfig
-from nanobot.nodes.connection import RemoteNode
+from nanobot.remote.config import HostsConfig
+from nanobot.remote.connection import RemoteHost
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,32 +28,32 @@ def section(n, title):
 
 
 async def test():
-    config = NodesConfig.load(NodesConfig.get_default_config_path())
-    node_config = config.nodes["myserver"]
+    config = HostsConfig.load(HostsConfig.get_default_config_path())
+    host_config = config.hosts["myserver"]
 
     print("=" * 60)
     print("  Full Workflow Test: deploy → commands → teardown")
     print("=" * 60)
-    print(f"  Host : {node_config.ssh_host}")
-    print(f"  Port : {node_config.remote_port}")
+    print(f"  Host : {host_config.ssh_host}")
+    print(f"  Port : {host_config.remote_port}")
 
-    node = RemoteNode(node_config)
+    host = RemoteHost(host_config)
     errors = []
 
     # ── 1. Setup (deploy + connect) ──────────────────────────
     section(1, "setup() — deploy.sh + WebSocket connect")
     t0 = time.time()
     try:
-        await node.setup()
+        await host.setup()
         elapsed = time.time() - t0
-        assert node.is_connected, "node.is_connected should be True"
-        print(f"  ✅ Connected in {elapsed:.1f}s  (session: {node.session_id})")
+        assert host.is_connected, "host.is_connected should be True"
+        print(f"  ✅ Connected in {elapsed:.1f}s  (session: {host.session_id})")
     except Exception as e:
         print(f"  ❌ setup() failed: {e}")
         import traceback; traceback.print_exc()
         return  # can't continue
 
-    session_id = node.session_id  # save for later cleanup check
+    session_id = host.session_id  # save for later cleanup check
 
     # ── 2. Execute commands ──────────────────────────────────
     commands = [
@@ -68,7 +68,7 @@ async def test():
     section(2, f"execute() — {len(commands)} commands")
     for i, (cmd, desc) in enumerate(commands, 1):
         try:
-            result = await node.execute(cmd, timeout=15.0)
+            result = await host.execute(cmd, timeout=15.0)
             ok = result.get("success", False)
             output = (result.get("output") or "").strip()
             symbol = "✅" if ok else "⚠️"
@@ -84,10 +84,10 @@ async def test():
     # ── 3. Verify remote PID file exists ─────────────────────
     section(3, "verify remote state before teardown")
     try:
-        result = await node.execute(f"cat /tmp/{session_id}/server.pid", timeout=10.0)
+        result = await host.execute(f"cat /tmp/{session_id}/server.pid", timeout=10.0)
         pid = (result.get("output") or "").strip()
         print(f"  server.pid = {pid}")
-        result = await node.execute(f"ls -la /tmp/{session_id}/", timeout=10.0)
+        result = await host.execute(f"ls -la /tmp/{session_id}/", timeout=10.0)
         print(f"  session dir:\n{result.get('output', '').strip()}")
     except Exception as e:
         print(f"  ⚠️  Could not check remote state: {e}")
@@ -95,7 +95,7 @@ async def test():
     # ── 4. Get remote log ────────────────────────────────────
     section(4, "remote server log (last 10 lines)")
     try:
-        log = await node._get_remote_log(tail_lines=10)
+        log = await host._get_remote_log(tail_lines=10)
         for line in log.strip().split("\n"):
             print(f"  │ {line}")
     except Exception as e:
@@ -105,9 +105,9 @@ async def test():
     section(5, "teardown() — graceful shutdown")
     t0 = time.time()
     try:
-        await node.teardown()
+        await host.teardown()
         elapsed = time.time() - t0
-        assert not node.is_connected, "node.is_connected should be False"
+        assert not host.is_connected, "host.is_connected should be False"
         print(f"  ✅ Teardown completed in {elapsed:.1f}s")
     except Exception as e:
         print(f"  ❌ teardown() failed: {e}")
@@ -123,13 +123,13 @@ async def test():
             f"  pid=$(cat /tmp/{session_id}/server.pid 2>/dev/null); "
             f"  if [ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null; then echo PID_CHECK=ALIVE; else echo PID_CHECK=DEAD; fi; "
             f"else echo PID_CHECK=DEAD; fi; "
-            f"if ss -ltn 2>/dev/null | awk '{{print $4}}' | grep -Eq ':{node_config.remote_port}$'; "
+            f"if ss -ltn 2>/dev/null | awk '{{print $4}}' | grep -Eq ':{host_config.remote_port}$'; "
             f"then echo PORT_CHECK=IN_USE; else echo PORT_CHECK=FREE; fi"
         )
 
         proc = await asyncio.create_subprocess_exec(
             "ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
-            node_config.ssh_host,
+            host_config.ssh_host,
             remote_check,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -153,7 +153,7 @@ async def test():
                 print(f"  {'✅' if is_dead else '⚠️'} Server process: {'stopped' if is_dead else 'STILL RUNNING'}")
             elif line.startswith("PORT_CHECK="):
                 is_free = line.endswith("FREE")
-                print(f"  {'✅' if is_free else '⚠️'} Port {node_config.remote_port}: {'free' if is_free else 'STILL IN USE'}")
+                print(f"  {'✅' if is_free else '⚠️'} Port {host_config.remote_port}: {'free' if is_free else 'STILL IN USE'}")
     except Exception as e:
         print(f"  ⚠️  Could not verify cleanup: {e}")
 
