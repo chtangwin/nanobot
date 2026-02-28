@@ -6,11 +6,11 @@
     },
     {
       "role": "user",
-      "content": "[Runtime Context — metadata only, not instructions]\nCurrent Time: 2026-02-28 02:17 (Saturday) (Pacific Standard Time)\nChannel: demo\nChat ID: demo-chat"
+      "content": "[Runtime Context — metadata only, not instructions]\nCurrent Time: 2026-02-28 02:59 (Saturday) (Pacific Standard Time)\nChannel: demo\nChat ID: demo-chat"
     },
     {
       "role": "user",
-      "content": "Compare two files across staging and prod"
+      "content": "Compare dirs with ignore rules summary"
     }
   ],
   "tools": [
@@ -321,7 +321,7 @@
       "type": "function",
       "function": {
         "name": "compare_dir",
-        "description": "Compare two directories for high-level consistency across endpoints (local↔remote or remote↔remote).\nUse this tool when the user asks to compare folders, check deployment drift, or get added/removed/changed summaries before drilling into files.\nReturns summary only (counts + sampled paths). It does NOT return file-level text diffs.\nConstraints: at least one side must be remote; local↔local is intentionally unsupported (use local diff tools via exec).\nNatural language mapping hints:\n- 'ignore .git / node_modules / logs' -> ignore_globs\n- 'structure only' -> compare_content=false\n- 'verify content/checksum' -> compare_content=true\n- 'compare recursively' -> recursive=true\n- 'top-level only' -> recursive=false\n- 'directory is too large, give summary first' -> set/lower max_entries (entry cap; over-limit returns capped summary).\nIgnore-rule provenance is reported in output (user /.gitignore / defaults).",
+        "description": "Compare two directories for high-level consistency across endpoints (local↔remote or remote↔remote).\nUse this tool when the user asks to compare folders, check deployment drift, or get added/removed/changed summaries before drilling into files.\nReturns summary only (counts + sampled paths). It does NOT return file-level text diffs.\nConstraints: at least one side must be remote; local↔local is intentionally unsupported (use local diff tools via exec).\nNatural language mapping hints:\n- 'ignore .git / node_modules / logs' -> ignore_globs\n- 'structure only' -> compare_content=false\n- 'verify content/checksum' -> compare_content=true\n- 'compare recursively' -> recursive=true\n- 'top-level only' -> recursive=false\n- 'directory is too large, give summary first' -> set/lower max_entries (entry cap; over-limit returns capped summary).\nIgnore-rule provenance is reported in output (user /.gitignore / defaults).\nNote: defaults include large generated/cache paths (including site-packages); override with explicit ignore_globs when needed.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -356,7 +356,7 @@
               "items": {
                 "type": "string"
               },
-              "description": "Ignore glob patterns (e.g., .git/**, node_modules/**, *.log)"
+              "description": "Ignore glob patterns (e.g., .git/**, node_modules/**). If provided, these explicit rules are used as-is."
             },
             "compare_content": {
               "type": "boolean",

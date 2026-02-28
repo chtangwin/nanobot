@@ -217,7 +217,7 @@ class CompareDirTool(Tool):
             "ignore_globs": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Ignore glob patterns (e.g., .git/**, node_modules/**, *.log)",
+                "description": "Ignore glob patterns (e.g., .git/**, node_modules/**). If provided, these explicit rules are used as-is.",
             },
             "compare_content": {
                 "type": "boolean",
@@ -286,7 +286,7 @@ class CompareDirTool(Tool):
         except Exception as e:
             return f"Error preparing compare backends: {e}"
 
-        ignore_patterns, ignore_sources = await self._resolve_ignore_patterns(
+        ignore_cfg = await self._resolve_ignore_config(
             left_backend,
             left_path,
             right_backend,
@@ -300,7 +300,7 @@ class CompareDirTool(Tool):
             root_path=left_path,
             recursive=recursive,
             max_entries=max_entries,
-            ignore_patterns=ignore_patterns,
+            ignore_patterns=ignore_cfg["left_patterns"],
             compare_content=compare_content,
         )
         if left_scan.get("error"):
@@ -312,7 +312,7 @@ class CompareDirTool(Tool):
             root_path=right_path,
             recursive=recursive,
             max_entries=max_entries,
-            ignore_patterns=ignore_patterns,
+            ignore_patterns=ignore_cfg["right_patterns"],
             compare_content=compare_content,
         )
         if right_scan.get("error"):
@@ -327,7 +327,7 @@ class CompareDirTool(Tool):
                 left_scan,
                 right_scan,
                 max_entries,
-                ignore_sources,
+                ignore_cfg,
             )
 
         return self._render_summary(
@@ -339,42 +339,49 @@ class CompareDirTool(Tool):
             right_scan,
             compare_content,
             recursive,
-            ignore_sources,
+            ignore_cfg,
         )
 
-    async def _resolve_ignore_patterns(
+    async def _resolve_ignore_config(
         self,
         left_backend: Any,
         left_path: str,
         right_backend: Any,
         right_path: str,
         user_globs: list[str] | None,
-    ) -> tuple[list[str], list[str]]:
-        patterns: list[str] = []
-        sources: list[str] = []
-
+    ) -> dict[str, Any]:
         if user_globs:
-            patterns.extend(user_globs)
-            sources.append("user")
+            left_patterns = self._dedup_patterns(user_globs)
+            right_patterns = self._dedup_patterns(user_globs)
+            left_source = "user"
+            right_source = "user"
         else:
-            gitignore_patterns = []
-            gitignore_patterns.extend(await self._load_gitignore(left_backend, left_path))
-            gitignore_patterns.extend(await self._load_gitignore(right_backend, right_path))
-            if gitignore_patterns:
-                patterns.extend(gitignore_patterns)
-                sources.append(".gitignore")
+            left_gitignore = await self._load_gitignore(left_backend, left_path)
+            right_gitignore = await self._load_gitignore(right_backend, right_path)
 
-        patterns.extend(self._DEFAULT_IGNORES)
-        sources.append("defaults")
+            left_patterns = self._dedup_patterns(left_gitignore + self._DEFAULT_IGNORES)
+            right_patterns = self._dedup_patterns(right_gitignore + self._DEFAULT_IGNORES)
 
-        # de-dup while preserving order
-        dedup = []
-        seen = set()
+            left_source = ".gitignore + defaults" if left_gitignore else "defaults"
+            right_source = ".gitignore + defaults" if right_gitignore else "defaults"
+
+        return {
+            "left_patterns": left_patterns,
+            "right_patterns": right_patterns,
+            "left_source": left_source,
+            "right_source": right_source,
+            "asymmetric": left_patterns != right_patterns,
+        }
+
+    @staticmethod
+    def _dedup_patterns(patterns: list[str]) -> list[str]:
+        dedup: list[str] = []
+        seen: set[str] = set()
         for p in patterns:
             if p and p not in seen:
                 dedup.append(p)
                 seen.add(p)
-        return dedup, sources
+        return dedup
 
     async def _load_gitignore(self, backend: Any, dir_path: str) -> list[str]:
         gitignore_path = f"{dir_path.rstrip('/')}/.gitignore"
@@ -496,7 +503,7 @@ class CompareDirTool(Tool):
         left_scan: dict[str, Any],
         right_scan: dict[str, Any],
         max_entries: int,
-        ignore_sources: list[str],
+        ignore_cfg: dict[str, Any],
     ) -> str:
         left_label = f"{left_host}:{left_path}" if left_host else f"local:{left_path}"
         right_label = f"{right_host}:{right_path}" if right_host else f"local:{right_path}"
@@ -504,8 +511,8 @@ class CompareDirTool(Tool):
             "Directory comparison aborted: entry limit exceeded before full analysis.\n"
             f"- left: {left_label} scanned={left_scan.get('count', 0)} (limit={max_entries})\n"
             f"- right: {right_label} scanned={right_scan.get('count', 0)} (limit={max_entries})\n"
-            "Tip: narrow paths or increase max_entries.\n"
-            f"Ignore rules applied from: {', '.join(ignore_sources)}"
+            "Tip: narrow paths or increase max_entries.\n\n"
+            + self._render_ignore_block(left_scan, right_scan, ignore_cfg)
         )
 
     def _render_summary(
@@ -518,7 +525,7 @@ class CompareDirTool(Tool):
         right_scan: dict[str, Any],
         compare_content: bool,
         recursive: bool,
-        ignore_sources: list[str],
+        ignore_cfg: dict[str, Any],
     ) -> str:
         left_entries: dict[str, dict[str, Any]] = left_scan["entries"]
         right_entries: dict[str, dict[str, Any]] = right_scan["entries"]
@@ -583,11 +590,28 @@ class CompareDirTool(Tool):
 
         lines += [
             "",
-            f"Ignored entries: left={left_scan.get('ignored_count', 0)}, right={right_scan.get('ignored_count', 0)}",
-            f"Ignore rules applied from: {', '.join(ignore_sources)}",
+            self._render_ignore_block(left_scan, right_scan, ignore_cfg),
             "Note: Run compare_file on selected paths for detailed file-level diff/checksum.",
         ]
         return "\n".join(lines)
+
+    @staticmethod
+    def _render_ignore_block(
+        left_scan: dict[str, Any],
+        right_scan: dict[str, Any],
+        ignore_cfg: dict[str, Any],
+    ) -> str:
+        left_source = ignore_cfg.get("left_source", "defaults")
+        right_source = ignore_cfg.get("right_source", "defaults")
+        left_ignored = left_scan.get("ignored_count", 0)
+        right_ignored = right_scan.get("ignored_count", 0)
+        status_line = "⚠️ Asymmetric ignore rules applied" if ignore_cfg.get("asymmetric") else "✅ Symmetric ignore rules"
+        return (
+            "🧹 Ignore rules:\n"
+            f"- Left  ({left_source}): {left_ignored} entries ignored\n"
+            f"- Right ({right_source}): {right_ignored} entries ignored\n"
+            f"{status_line}"
+        )
 
 
 class CompareFileTool(Tool):

@@ -91,7 +91,10 @@ async def test_compare_dir_structure_summary_and_ignore_note():
     assert "- only in right: 1" in result
     assert "only_left.txt" in result
     assert "only_right.txt" in result
-    assert "Ignore rules applied from" in result
+    assert "🧹 Ignore rules:" in result
+    assert "- Left  (.gitignore + defaults):" in result
+    assert "- Right (defaults):" in result
+    assert "Asymmetric ignore rules applied" in result
 
 
 @pytest.mark.asyncio
