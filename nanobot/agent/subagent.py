@@ -101,7 +101,7 @@ class SubagentManager:
                     block_sensitive_files=self.block_sensitive_files,
                     path_append=self.exec_config.path_append,
                 ),
-                node_manager=None,
+                host_manager=None,
             )
             tools.register(ReadFileTool(backend_router))
             tools.register(WriteFileTool(backend_router))
