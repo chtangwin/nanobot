@@ -164,7 +164,7 @@ class AgentLoop:
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
-        self.tools.register(NodesTool())
+        self.tools.register(NodesTool(node_manager=self.node_manager))
         self.tools.register(CompareTool(node_manager=self.node_manager))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))

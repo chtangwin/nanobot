@@ -204,7 +204,7 @@ class ExecTool(Tool):
         try:
             # Change directory if working_dir is specified
             if working_dir:
-                full_command = f"cd {working_dir} && {command}"
+                full_command = f"cd '{working_dir}' && {command}"
             else:
                 full_command = command
 

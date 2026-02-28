@@ -26,6 +26,8 @@ import sys
 import signal
 import argparse
 import logging
+import time
+import uuid
 
 try:
     import websockets
@@ -43,18 +45,36 @@ logger = logging.getLogger(__name__)
 
 
 class TmuxSession:
-    """Manage a tmux session for maintaining context using a dedicated socket."""
+    """Manage a tmux session for maintaining context using a dedicated socket.
+
+    Commands are wrapped with unique markers so that output can be reliably
+    extracted regardless of shell prompt format or special characters in the
+    output.  The execution loop polls ``capture-pane`` until the end-marker
+    (which embeds the exit code) appears.
+    """
+
+    # How long to wait between capture-pane polls (seconds).
+    _POLL_INTERVAL_INITIAL = 0.15
+    _POLL_INTERVAL_MAX = 1.0
+    # Absolute timeout for a single command execution poll loop.
+    _POLL_TIMEOUT = 60.0
 
     def __init__(self, session_name: str = DEFAULT_SESSION_NAME, socket_path: str = None):
         self.session_name = session_name
-        # Socket will be in session directory (/tmp/nanobot-xxx/nanobot.sock)
-        # This is set by the caller before create()
         self.socket_path = socket_path
         self.running = False
+
+    # -- helpers ----------------------------------------------------------
 
     def _tmux_cmd(self, *args) -> list:
         """Build tmux command with socket."""
         return ["tmux", "-S", self.socket_path] + list(args)
+
+    def _run(self, *args, **kwargs) -> subprocess.CompletedProcess:
+        """Shorthand for subprocess.run with the tmux socket."""
+        return subprocess.run(self._tmux_cmd(*args), **kwargs)
+
+    # -- lifecycle --------------------------------------------------------
 
     async def create(self):
         """Create a new tmux session with dedicated socket."""
@@ -65,111 +85,150 @@ class TmuxSession:
         socket_dir = os.path.dirname(self.socket_path)
         os.makedirs(socket_dir, exist_ok=True)
 
-        # Check if session already exists
-        result = subprocess.run(
-            self._tmux_cmd("has-session", "-t", self.session_name),
-            capture_output=True,
-        )
-        if result.returncode == 0:
-            # Session exists, kill it
-            self.kill()
+        # Clean up stale session if it exists
+        if self._run("has-session", "-t", self.session_name, capture_output=True).returncode == 0:
+            self._run("kill-session", "-t", self.session_name, capture_output=True)
+            logger.info(f"Cleaned up stale tmux session: {self.session_name}")
 
-        # Create new session with socket
-        subprocess.run(
-            self._tmux_cmd("new-session", "-d", "-s", self.session_name, "-n", "shell"),
-            check=True,
-        )
+        # Create new session
+        self._run("new-session", "-d", "-s", self.session_name, "-n", "shell", check=True)
         self.running = True
         logger.info(f"Created tmux session: {self.session_name} on socket {self.socket_path}")
 
-        # Save tmux socket info to file for cleanup later
+        # Record tmux server PID (via `tmux display -p '#{pid}'`)
         try:
-            # Get the tmux server PID from socket file
-            socket_stat = os.stat(self.socket_path)
-            # The tmux server PID is stored as the socket's group ID
-            # Save to the session's temp directory
-            session_dir = os.path.dirname(self.socket_path)  # /tmp/nanobot-xxx
-            with open(f"{session_dir}/tmux.pid", 'w') as f:
-                f.write(str(socket_stat.st_gid))
-            logger.info(f"Saved tmux PID to {session_dir}/tmux.pid")
+            r = self._run(
+                "display-message", "-p", "#{pid}",
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                pid_path = os.path.join(socket_dir, "tmux.pid")
+                with open(pid_path, "w") as f:
+                    f.write(r.stdout.strip())
+                logger.info(f"Saved tmux server PID to {pid_path}")
         except Exception as e:
-            logger.warning(f"Could not save tmux info: {e}")
+            logger.warning(f"Could not save tmux PID: {e}")
 
-    async def send(self, command: str) -> None:
-        """Send command to tmux session."""
-        # Escape single quotes in command
-        escaped = command.replace("'", "'\\''")
-        # Use send-keys with literal string
-        subprocess.run(
-            self._tmux_cmd("send-keys", "-t", self.session_name, "-l", "--", escaped),
-            check=True,
-        )
-        # Send Enter
-        subprocess.run(
-            self._tmux_cmd("send-keys", "-t", self.session_name, "Enter"),
-            check=True,
-        )
-        logger.debug(f"Sent command to tmux: {command[:50]}...")
+    # -- command execution ------------------------------------------------
 
-    async def capture(self) -> str:
-        """Capture output from tmux session using proper tmux socket and history."""
-        # Use -J to include wrapped lines, -S -50 to get last 50 lines of history
-        result = subprocess.run(
-            ["tmux", "-S", self.socket_path, "capture-pane", "-p", "-J", "-t", self.session_name, "-S", "-50"],
-            capture_output=True,
-            text=True,
-            check=True,
+    async def send_and_capture(self, command: str) -> dict:
+        """Send a command and capture its output using unique markers.
+
+        Returns ``{"output": str, "exit_code": int}``.
+        """
+        marker_id = uuid.uuid4().hex[:12]
+        start_marker = f"__NANOBOT_START_{marker_id}__"
+        end_marker = f"__NANOBOT_END_{marker_id}__"
+
+        # Wrap:  echo START; <cmd>; _ec=$?; echo; echo END_$_ec
+        # The extra ``echo`` before END ensures the end-marker starts on its
+        # own line even when the command output doesn't end with a newline.
+        wrapped = (
+            f"echo {start_marker}; "
+            f"{command}; _nanobot_ec=$?; "
+            f"echo; echo {end_marker}_${{_nanobot_ec}}"
         )
 
-        raw_output = result.stdout
-        lines = raw_output.split('\n')
+        # Send to tmux (literal mode to preserve special chars)
+        escaped = wrapped.replace("'", "'\\''")
+        self._run("send-keys", "-t", self.session_name, "-l", "--", escaped, check=True)
+        self._run("send-keys", "-t", self.session_name, "Enter", check=True)
 
-        # Strategy: Find ALL prompt lines, then get content between the last two prompts
-        # This captures the actual command output
-        
-        prompt_indices = []
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            # Detect prompt lines (contain $ or #)
-            if '$' in stripped or '#' in stripped:
-                prompt_indices.append(i)
-        
-        output = ""
-        
-        if len(prompt_indices) >= 2:
-            # Get content between the last two prompts
-            last_prompt = prompt_indices[-1]
-            second_last_prompt = prompt_indices[-2]
-            
-            # Get lines between prompts
-            output_lines = lines[second_last_prompt + 1:last_prompt]
-            output = '\n'.join(line.strip() for line in output_lines if line.strip())
-        elif len(prompt_indices) == 1:
-            # Only one prompt - get everything after it
-            last_prompt = prompt_indices[0]
-            output_lines = lines[last_prompt + 1:]
-            output = '\n'.join(line.strip() for line in output_lines if line.strip())
-        
-        # Fallback: if still empty, try last few non-prompt lines
-        if not output:
-            filtered = []
-            for line in lines:
-                stripped = line.strip()
-                if stripped and '$' not in stripped and '#' not in stripped:
-                    filtered.append(stripped)
-            if filtered:
-                output = '\n'.join(filtered[-3:])  # Last 3 non-prompt lines
+        # Poll capture-pane until end-marker appears
+        poll_interval = self._POLL_INTERVAL_INITIAL
+        deadline = time.monotonic() + self._POLL_TIMEOUT
+        raw = ""
 
-        return output.strip()
+        while time.monotonic() < deadline:
+            await asyncio.sleep(poll_interval)
+            raw = self._capture_raw()
+            if end_marker in raw:
+                break
+            # Back off: 0.15 → 0.3 → 0.6 → 1.0 → 1.0 …
+            poll_interval = min(poll_interval * 2, self._POLL_INTERVAL_MAX)
+        else:
+            # Timeout — return whatever we have
+            logger.warning(f"Capture timed out after {self._POLL_TIMEOUT}s for marker {marker_id}")
+            return {"output": self._extract_partial(raw, start_marker), "exit_code": -1}
 
-    def kill(self):
-        """Kill the tmux session."""
-        subprocess.run(
-            self._tmux_cmd("kill-session", "-t", self.session_name),
-            capture_output=True,
+        return self._parse_markers(raw, start_marker, end_marker)
+
+    # -- capture helpers --------------------------------------------------
+
+    def _capture_raw(self) -> str:
+        """Capture full pane content (up to 500 lines of scrollback)."""
+        r = self._run(
+            "capture-pane", "-p", "-J", "-t", self.session_name, "-S", "-500",
+            capture_output=True, text=True,
         )
+        return r.stdout if r.returncode == 0 else ""
+
+    @staticmethod
+    def _parse_markers(raw: str, start_marker: str, end_marker: str) -> dict:
+        """Extract output and exit code from captured text between markers."""
+        lines = raw.split("\n")
+        collecting = False
+        output_lines: list[str] = []
+        exit_code = -1
+
+        for line in lines:
+            if start_marker in line:
+                collecting = True
+                continue
+            if end_marker in line:
+                # Parse exit code: __NANOBOT_END_xxxx___<ec>
+                # The line looks like: __NANOBOT_END_abc123def456___0
+                suffix = line.split(end_marker, 1)[1].lstrip("_")
+                try:
+                    exit_code = int(suffix)
+                except ValueError:
+                    exit_code = -1
+                break
+            if collecting:
+                output_lines.append(line)
+
+        # Trim empty leading/trailing lines from the captured output
+        while output_lines and not output_lines[0].strip():
+            output_lines.pop(0)
+        while output_lines and not output_lines[-1].strip():
+            output_lines.pop()
+
+        return {"output": "\n".join(output_lines), "exit_code": exit_code}
+
+    @staticmethod
+    def _extract_partial(raw: str, start_marker: str) -> str:
+        """Best-effort extraction when the end-marker is missing (timeout)."""
+        idx = raw.find(start_marker)
+        if idx == -1:
+            return raw[-2000:] if len(raw) > 2000 else raw
+        after = raw[idx + len(start_marker):]
+        lines = after.strip().split("\n")
+        return "\n".join(lines[:200])
+
+    # -- teardown ---------------------------------------------------------
+
+    def destroy(self):
+        """Gracefully destroy the tmux session.
+
+        Sends ``exit`` to the shell first; falls back to ``kill-session``.
+        """
+        if not self.running:
+            return
+
+        try:
+            self._run("send-keys", "-t", self.session_name, "exit", "Enter",
+                       capture_output=True, timeout=3)
+            time.sleep(0.5)
+        except Exception:
+            pass
+
+        if self._run("has-session", "-t", self.session_name, capture_output=True).returncode == 0:
+            self._run("kill-session", "-t", self.session_name, capture_output=True)
+            logger.info(f"Killed tmux session: {self.session_name}")
+        else:
+            logger.info(f"Tmux session {self.session_name} exited gracefully")
+
         self.running = False
-        logger.info(f"Killed tmux session: {self.session_name}")
 
 
 class SimpleExecutor:
@@ -218,70 +277,24 @@ class CommandExecutor:
             return await self._execute_simple(command)
 
     async def _execute_tmux(self, command: str) -> dict:
-        """Execute command using tmux session with output capture."""
+        """Execute command using tmux session with marker-based output capture."""
         try:
-            # Ensure tmux session exists
             await self.tmux.create()
 
-            # Debug: check session exists
-            logger.debug(f"TMUX: Session {self.tmux.session_name} created, checking...")
+            result = await self.tmux.send_and_capture(command)
 
-            # Send command
-            await self.tmux.send(command)
-            logger.debug(f"TMUX: Sent command: {command}")
-
-            # Wait for command to execute
-            await asyncio.sleep(0.8)
-
-            # Capture output using tmux capture-pane with socket
-            result = subprocess.run(
-                ["tmux", "-S", self.tmux.socket_path, "capture-pane", "-p", "-J", "-t", self.tmux.session_name, "-S", "-50"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-
-            raw_output = result.stdout
-            lines = raw_output.split('\n')
-
-            # Find ALL prompt lines, then get content between the last two prompts
-            prompt_indices = []
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-                if '$' in stripped or '#' in stripped:
-                    prompt_indices.append(i)
-            
-            output = ""
-            
-            if len(prompt_indices) >= 2:
-                last_prompt = prompt_indices[-1]
-                second_last_prompt = prompt_indices[-2]
-                output_lines = lines[second_last_prompt + 1:last_prompt]
-                output = '\n'.join(line.strip() for line in output_lines if line.strip())
-            elif len(prompt_indices) == 1:
-                last_prompt = prompt_indices[0]
-                output_lines = lines[last_prompt + 1:]
-                output = '\n'.join(line.strip() for line in output_lines if line.strip())
-            
-            # Fallback
-            if not output:
-                filtered = []
-                for line in lines:
-                    stripped = line.strip()
-                    if stripped and '$' not in stripped and '#' not in stripped:
-                        filtered.append(stripped)
-                if filtered:
-                    output = '\n'.join(filtered[-3:])
-
+            exit_code = result["exit_code"]
             return {
-                "success": True,
-                "output": output.strip(),
-                "error": None,
+                "success": exit_code == 0,
+                "output": result["output"],
+                "exit_code": exit_code,
+                "error": None if exit_code == 0 else f"exit code {exit_code}",
             }
         except Exception as e:
             return {
                 "success": False,
                 "output": None,
+                "exit_code": -1,
                 "error": str(e),
             }
 
@@ -293,11 +306,24 @@ class CommandExecutor:
     def cleanup(self):
         """Clean up resources."""
         if self.tmux:
-            self.tmux.kill()
+            self.tmux.destroy()
 
 
-async def handle_connection(websocket, auth_token: str, use_tmux: bool, session_dir: str = None):
-    """Handle WebSocket connection."""
+async def handle_connection(
+    websocket,
+    auth_token: str,
+    use_tmux: bool,
+    session_dir: str = None,
+    stop_event: asyncio.Event = None,
+):
+    """Handle WebSocket connection.
+
+    Message types:
+        execute  - run a command, returns result
+        ping     - health check, returns pong
+        close    - close this connection (server stays up)
+        shutdown - gracefully shut down the entire server
+    """
     logger.info(f"New connection from {websocket.remote_address}")
 
     # Authentication
@@ -334,8 +360,9 @@ async def handle_connection(websocket, auth_token: str, use_tmux: bool, session_
         async for message in websocket:
             try:
                 data = json.loads(message)
+                msg_type = data.get("type")
 
-                if data.get("type") == "execute":
+                if msg_type == "execute":
                     command = data.get("command")
                     if not command:
                         await websocket.send(json.dumps({
@@ -352,17 +379,27 @@ async def handle_connection(websocket, auth_token: str, use_tmux: bool, session_
                         **result
                     }))
 
-                elif data.get("type") == "ping":
+                elif msg_type == "ping":
                     await websocket.send(json.dumps({"type": "pong"}))
 
-                elif data.get("type") == "close":
-                    logger.info("Received close message")
+                elif msg_type == "close":
+                    logger.info("Received close message, closing connection")
+                    break
+
+                elif msg_type == "shutdown":
+                    logger.info("Received shutdown message, stopping server")
+                    await websocket.send(json.dumps({
+                        "type": "shutdown_ack",
+                        "message": "Server shutting down"
+                    }))
+                    if stop_event:
+                        stop_event.set()
                     break
 
                 else:
                     await websocket.send(json.dumps({
                         "type": "error",
-                        "message": f"Unknown message type: {data.get('type')}"
+                        "message": f"Unknown message type: {msg_type}"
                     }))
 
             except json.JSONDecodeError:
@@ -411,6 +448,12 @@ async def main():
 
     args = parser.parse_args()
 
+    # Setup logging FIRST so all subsequent messages are formatted
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+
     # Load config file if specified
     if args.config:
         import json
@@ -441,12 +484,6 @@ async def main():
         token = args.token
         use_tmux = not args.no_tmux
 
-    # Setup logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-
     logger.info(f"Starting node_server on port {port}")
     if token:
         logger.info("Authentication token enabled")
@@ -467,9 +504,15 @@ async def main():
         loop.add_signal_handler(sig, signal_handler)
 
     # Start server
-    # Determine session directory from config file path
-    session_dir = os.path.dirname(args.config) if args.config else None
-    handler = lambda ws: handle_connection(ws, token, use_tmux, session_dir)
+    # Determine session directory: prefer config file dir, then CWD if it
+    # looks like a nanobot session dir (/tmp/nanobot-*), else None.
+    if args.config:
+        session_dir = os.path.dirname(os.path.abspath(args.config))
+    else:
+        cwd = os.getcwd()
+        session_dir = cwd if os.path.basename(cwd).startswith("nanobot-") else None
+
+    handler = lambda ws: handle_connection(ws, token, use_tmux, session_dir, stop_event)
 
     async with websockets.serve(handler, "0.0.0.0", port):
         logger.info(f"Server listening on ws://0.0.0.0:{port}")

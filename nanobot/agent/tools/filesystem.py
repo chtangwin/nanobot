@@ -110,7 +110,7 @@ class ReadFileTool(Tool):
 
         try:
             result = await self._node_manager.execute(
-                f"cat {path}",
+                f"cat '{path}'",
                 node=node,
                 timeout=30.0,
             )
@@ -206,7 +206,7 @@ class WriteFileTool(Tool):
             encoded = base64.b64encode(content.encode()).decode()
 
             result = await self._node_manager.execute(
-                f"mkdir -p $(dirname {path}) && echo {encoded} | base64 -d > {path}",
+                f"mkdir -p \"$(dirname '{path}')\" && echo '{encoded}' | base64 -d > '{path}'",
                 node=node,
                 timeout=30.0,
             )
@@ -434,7 +434,7 @@ class CompareTool(Tool):
 
         try:
             result = await self._node_manager.execute(
-                f"cat {remote_path}",
+                f"cat '{remote_path}'",
                 node=node,
                 timeout=30.0,
             )

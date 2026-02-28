@@ -1,11 +1,11 @@
 """Remote node connection implementation."""
 
 import asyncio
-import uuid
 import json
-import base64
 import logging
-import subprocess
+import shutil
+import tempfile
+import uuid
 from typing import Optional, Any
 from pathlib import Path
 
@@ -20,22 +20,15 @@ from nanobot.nodes.config import NodeConfig
 
 logger = logging.getLogger(__name__)
 
+# Paths to files that get uploaded to the remote node
+_MODULE_DIR = Path(__file__).parent
+_NODE_SCRIPT_PATH = _MODULE_DIR / "node_server.py"
+_DEPLOY_SCRIPT_PATH = _MODULE_DIR / "deploy.sh"
 
-def _get_node_script_path() -> Path:
-    """Get the path to the node_server.py script.
-
-    The script is located in the same directory as this module.
-    """
-    return Path(__file__).parent / "node_server.py"
-
-
-# Load the node script at module import
-_NODE_SCRIPT_PATH = _get_node_script_path()
-if _NODE_SCRIPT_PATH.exists():
-    _NODE_SCRIPT = _NODE_SCRIPT_PATH.read_text()
-else:
-    logger.warning(f"node_server.py not found at {_NODE_SCRIPT_PATH}")
-    _NODE_SCRIPT = ""
+# Validate at import time
+for _p in (_NODE_SCRIPT_PATH, _DEPLOY_SCRIPT_PATH):
+    if not _p.exists():
+        logger.warning(f"Required file not found: {_p}")
 
 class RemoteNode:
     """
@@ -83,11 +76,8 @@ class RemoteNode:
             # Create SSH tunnel
             await self._create_ssh_tunnel()
 
-            # Deploy node script
-            await self._deploy_node()
-
-            # Start node process
-            await self._start_node()
+            # Deploy and start node (single operation)
+            await self._deploy_and_start_node()
 
             # Connect WebSocket
             await self._connect_websocket()
@@ -111,21 +101,40 @@ class RemoteNode:
             raise ConnectionError(f"Failed to connect to {self.config.name}: {e}")
 
     async def teardown(self):
-        """Clean up all resources."""
+        """Clean up all resources.
+
+        Shutdown sequence:
+        1. Send ``shutdown`` via WebSocket → node_server exits gracefully
+           (cleans up tmux, closes WebSocket server, process exits)
+        2. If shutdown didn't work, fall back to SSH-based kill
+        3. Close the local SSH tunnel
+        4. Clean up remote session directory
+        """
         self._running = False
         self._authenticated = False
 
-        cleanup_steps = [
-            ("WebSocket", self._close_websocket),
-            ("remote node", self._stop_node),
-            ("SSH tunnel", self._close_ssh_tunnel),
-        ]
+        # Step 1: Try graceful shutdown via WebSocket
+        server_stopped = await self._request_shutdown()
 
-        for name, cleanup in cleanup_steps:
+        # Step 2: If graceful shutdown failed, force-stop via SSH
+        if not server_stopped:
             try:
-                await cleanup()
+                await self._force_stop_node()
             except Exception as e:
-                logger.warning(f"Failed to cleanup {name}: {e}")
+                logger.warning(f"Failed to force-stop remote node: {e}")
+
+        # Step 3: Clean up remote session directory
+        if self.session_id:
+            try:
+                await self._ssh_exec(f"rm -rf /tmp/{self.session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to clean remote directory: {e}")
+
+        # Step 4: Close SSH tunnel (must be last — steps 2-3 need it)
+        try:
+            await self._close_ssh_tunnel()
+        except Exception as e:
+            logger.warning(f"Failed to close SSH tunnel: {e}")
 
         logger.info(f"Remote node {self.config.name} disconnected")
 
@@ -251,74 +260,73 @@ class RemoteNode:
             finally:
                 self.tunnel_process = None
 
-    async def _deploy_node(self):
-        """Deploy node script to remote server."""
-        if not _NODE_SCRIPT:
-            raise RuntimeError("node_server.py script not found. Cannot deploy node.")
+    async def _deploy_and_start_node(self):
+        """Deploy files and start node on remote server using deploy.sh.
 
-        # Create remote temporary directory
+        Stages:
+        1. Prepare a local staging directory (node_server.py + deploy.sh)
+        2. Create remote session directory
+        3. Upload everything in a single ``scp -r`` call
+        4. Execute ``deploy.sh`` with port/token/tmux args on remote
+        """
+        for path, name in [(_NODE_SCRIPT_PATH, "node_server.py"), (_DEPLOY_SCRIPT_PATH, "deploy.sh")]:
+            if not path.exists():
+                raise RuntimeError(f"{name} not found at {path}")
+
         remote_dir = f"/tmp/{self.session_id}"
-        logger.info(f"Creating remote directory: {remote_dir}")
-        await self._ssh_exec(f"mkdir -p {remote_dir}")
 
-        # Write node_server.py to a local temp file first
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write(_NODE_SCRIPT)
-            local_script_path = f.name
+        # -- 1. Stage files locally ------------------------------------------
+        with tempfile.TemporaryDirectory() as staging:
+            staging_path = Path(staging)
+            shutil.copy2(_NODE_SCRIPT_PATH, staging_path / "node_server.py")
+            shutil.copy2(_DEPLOY_SCRIPT_PATH, staging_path / "deploy.sh")
 
-        # Upload node_server.py via scp
-        logger.info(f"Uploading node_server.py to {remote_dir}")
-        scp_cmd = ["scp"]
-        if self.config.ssh_port:
-            scp_cmd.extend(["-P", str(self.config.ssh_port)])
-        if self.config.ssh_key_path:
-            scp_cmd.extend(["-i", self.config.ssh_key_path])
-        scp_cmd.extend([local_script_path, f"{self.config.ssh_host}:{remote_dir}/node_server.py"])
+            logger.info(
+                f"Deploying to {self.config.ssh_host}:{remote_dir} "
+                f"(port={self.config.remote_port}, "
+                f"token={'***' if self.config.auth_token else 'none'})"
+            )
 
-        process = await asyncio.create_subprocess_exec(
-            *scp_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
+            # -- 2. Create remote directory -----------------------------------
+            await self._ssh_exec(f"mkdir -p {remote_dir}")
 
-        # Clean up temp file
-        import os
-        os.unlink(local_script_path)
+            # -- 3. Upload all files in one scp call --------------------------
+            await self._scp_upload(staging, remote_dir)
 
-        if process.returncode != 0:
-            error_msg = stderr.decode() if stderr else "Unknown error"
-            raise RuntimeError(f"Failed to upload node_server.py: {error_msg}")
-
-        logger.info(f"Script uploaded successfully")
-
-        # Create and upload config.json
-        config = {
-            "port": self.config.remote_port,
-            "tmux": True,  # Enable tmux for session persistence
-        }
+        # -- 4. Execute deploy script with args on remote ---------------------
+        deploy_args = f"--port {self.config.remote_port}"
         if self.config.auth_token:
-            config["token"] = self.config.auth_token
+            deploy_args += f" --token '{self.config.auth_token}'"
 
-        import json
-        config_json = json.dumps(config, indent=2)
+        logger.info("Running deploy.sh on remote...")
+        output = await self._ssh_exec(
+            f"bash {remote_dir}/deploy.sh {deploy_args}",
+            timeout=90.0,  # allow time for uv install + websockets download
+        )
+        logger.info(f"Deploy output: {output}")
 
-        # Write config to local temp file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            f.write(config_json)
-            local_config_path = f.name
+    async def _scp_upload(self, local_dir: str, remote_dir: str):
+        """Upload contents of a local directory to remote via scp.
 
-        # Upload config.json via scp
-        logger.info(f"Uploading config.json to {remote_dir}")
-        logger.info(f"Config: port={config['port']}, tmux={config['tmux']}, token={'***' if config.get('token') else 'none'}")
-
-        scp_cmd = ["scp"]
+        Uses a single ``scp -r`` with proper SSH options to avoid
+        interactive prompts.
+        """
+        scp_cmd = [
+            "scp", "-r",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "BatchMode=yes",
+        ]
         if self.config.ssh_port:
             scp_cmd.extend(["-P", str(self.config.ssh_port)])
         if self.config.ssh_key_path:
             scp_cmd.extend(["-i", self.config.ssh_key_path])
-        scp_cmd.extend([local_config_path, f"{self.config.ssh_host}:{remote_dir}/config.json"])
+
+        # Upload contents: local_dir/* -> remote_dir/
+        # We use glob to list files so scp places them inside remote_dir
+        local_files = [str(p) for p in Path(local_dir).iterdir()]
+        scp_cmd.extend(local_files)
+        scp_cmd.append(f"{self.config.ssh_host}:{remote_dir}/")
 
         process = await asyncio.create_subprocess_exec(
             *scp_cmd,
@@ -327,49 +335,9 @@ class RemoteNode:
         )
         stdout, stderr = await process.communicate()
 
-        # Clean up temp file
-        os.unlink(local_config_path)
-
         if process.returncode != 0:
             error_msg = stderr.decode() if stderr else "Unknown error"
-            raise RuntimeError(f"Failed to upload config.json: {error_msg}")
-
-        logger.info(f"Config uploaded successfully")
-
-    async def _start_node(self):
-        """Start the node process on remote server."""
-        remote_dir = f"/tmp/{self.session_id}"
-        log_file = f"{remote_dir}/node_server.log"
-        config_file = f"{remote_dir}/config.json"
-
-        # Kill any existing node_server.py processes using this port
-        logger.info(f"Cleaning up existing node_server processes on port {self.config.remote_port}")
-        
-        # Kill processes using the port first
-        await self._ssh_exec(
-            f"fuser -k {self.config.remote_port}/tcp 2>/dev/null || true"
-        )
-        
-        # Also kill any node_server.py processes
-        await self._ssh_exec(
-            f"pkill -f 'node_server.py' || true"
-        )
-        
-        await asyncio.sleep(1)
-
-        # Build command using config file
-        # Use setsid to fully detach from terminal
-        cmd = f"cd {remote_dir} && setsid uv run --with websockets node_server.py --config {config_file} > {log_file} 2>&1 &"
-
-        logger.info(f"Starting node on remote with config file")
-        logger.info(f"Remote log: {log_file}")
-        logger.info(f"Remote config: {config_file}")
-
-        await self._ssh_exec(cmd)
-
-        # Wait for node to start
-        logger.info(f"Waiting 3s for node to start...")
-        await asyncio.sleep(3)
+            raise RuntimeError(f"scp upload failed: {error_msg}")
 
     async def _get_remote_log(self, tail_lines: int = 50) -> str:
         """Get remote node server log."""
@@ -384,40 +352,74 @@ class RemoteNode:
         except Exception as e:
             return f"Failed to get log: {e}"
 
-    async def _stop_node(self):
-        """Stop the node process on remote server."""
-        if self.session_id:
-            remote_dir = f"/tmp/{self.session_id}"
-            config_file = f"{remote_dir}/config.json"
+    async def _request_shutdown(self) -> bool:
+        """Ask node_server to shut itself down via WebSocket.
 
-            # Kill the node process using config file path
-            logger.info(f"Stopping node process for session {self.session_id}")
-            
-            # Try multiple methods to ensure process is killed
-            await self._ssh_exec(
-                f"pkill -f 'node_server.py.*--config.*{config_file}' || true"
-            )
-            await asyncio.sleep(0.5)
-            
-            # Force kill if still running
-            await self._ssh_exec(
-                f"pkill -9 -f 'node_server.py.*--config.*{config_file}' || true"
-            )
-            
-            # Also kill by port
-            await self._ssh_exec(
-                f"fuser -k {self.config.remote_port}/tcp 2>/dev/null || true"
-            )
+        Returns True if the server acknowledged the shutdown.
+        """
+        if not self.websocket:
+            return False
 
-            # Kill tmux session for this node
-            await self._ssh_exec(
-                f"tmux -S /tmp/nanobot-tmux.sock kill-session -t nanobot 2>/dev/null || true"
-            )
+        try:
+            await self.websocket.send(json.dumps({"type": "shutdown"}))
 
-            await asyncio.sleep(0.5)
+            # Wait for acknowledgement
+            response = await asyncio.wait_for(self.websocket.recv(), timeout=5.0)
+            data = json.loads(response)
 
-            # Clean up - use remote_dir variable
-            await self._ssh_exec(f"rm -rf {remote_dir}")
+            if data.get("type") == "shutdown_ack":
+                logger.info("Server acknowledged shutdown, waiting for process to exit...")
+                # Give it a moment to finish cleanup (tmux destroy, etc.)
+                await asyncio.sleep(2.0)
+                return True
+
+            logger.warning(f"Unexpected shutdown response: {data}")
+            return False
+
+        except (asyncio.TimeoutError, ConnectionError):
+            logger.warning("Shutdown request timed out or connection lost")
+            return False
+        except Exception as e:
+            logger.warning(f"Shutdown request failed: {e}")
+            return False
+        finally:
+            # Always close the websocket object on our side
+            if self.websocket:
+                try:
+                    await self.websocket.close()
+                except Exception:
+                    pass
+                self.websocket = None
+
+    async def _force_stop_node(self):
+        """Force-stop the remote node via SSH. Fallback when graceful shutdown fails."""
+        if not self.session_id:
+            return
+
+        remote_dir = f"/tmp/{self.session_id}"
+        pid_file = f"{remote_dir}/server.pid"
+        tmux_sock = f"{remote_dir}/tmux.sock"
+
+        logger.info(f"Force-stopping node for session {self.session_id}")
+
+        # 1. SIGTERM via PID file, wait, then SIGKILL if needed
+        await self._ssh_exec(
+            f"if [ -f {pid_file} ]; then "
+            f"  pid=$(cat {pid_file}); "
+            f"  kill $pid 2>/dev/null && sleep 1; "
+            f"  kill -0 $pid 2>/dev/null && kill -9 $pid 2>/dev/null; "
+            f"fi || true"
+        )
+
+        # 2. Fallback: kill by port
+        await self._ssh_exec(
+            f"fuser -k {self.config.remote_port}/tcp 2>/dev/null || true"
+        )
+
+        # 3. Clean up tmux session
+        await self._ssh_exec(
+            f"tmux -S '{tmux_sock}' kill-session -t nanobot 2>/dev/null || true"
+        )
 
     async def _connect_websocket(self):
         """Connect to remote node via WebSocket."""
@@ -434,23 +436,6 @@ class RemoteNode:
             raise ConnectionError(f"WebSocket connection timeout: {ws_url}")
         except Exception as e:
             raise ConnectionError(f"WebSocket connection failed: {e}")
-
-    async def _close_websocket(self):
-        """Close WebSocket connection."""
-        if self.websocket:
-            try:
-                # Send close message
-                await self.websocket.send(json.dumps({"type": "close"}))
-                await asyncio.sleep(0.5)
-            except Exception:
-                pass
-
-            try:
-                await self.websocket.close()
-            except Exception:
-                pass
-            finally:
-                self.websocket = None
 
     async def _authenticate(self):
         """Authenticate with the remote node."""
@@ -475,44 +460,49 @@ class RemoteNode:
         else:
             raise ConnectionError(f"Unexpected authentication response: {data}")
 
-    async def _ssh_exec(self, command: str) -> str:
-        """Execute a command via SSH."""
-        ssh_cmd = [
+    def _build_ssh_cmd(self) -> list[str]:
+        """Build base SSH command with common options."""
+        cmd = [
             "ssh",
             "-p", str(self.config.ssh_port),
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "BatchMode=yes",
         ]
-
         if self.config.ssh_key_path:
-            ssh_cmd.extend(["-i", self.config.ssh_key_path])
+            cmd.extend(["-i", self.config.ssh_key_path])
+        return cmd
 
+    async def _ssh_exec(self, command: str, timeout: float = 30.0) -> str:
+        """Execute a command via SSH.
+
+        All commands are executed with asyncio and awaited properly.
+        The old Popen-for-background-commands approach is no longer needed
+        because deploy.sh handles daemonization via setsid/disown.
+        """
+        ssh_cmd = self._build_ssh_cmd()
         ssh_cmd.extend([self.config.ssh_host, command])
 
-        # For background commands (& at end), use subprocess.Popen to avoid hanging
-        if command.strip().endswith('&'):
-            proc = subprocess.Popen(
-                ssh_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            return ""
-            
-        # For regular commands, use asyncio
         process = await asyncio.create_subprocess_exec(
             *ssh_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
 
-        stdout, stderr = await process.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            raise RuntimeError(f"SSH command timed out after {timeout}s: {command[:80]}")
 
         if process.returncode != 0:
             stderr_text = stderr.decode() if stderr else ""
-            # Log but don't fail on warnings
+            # Log but don't fail on SSH warnings
             if "Warning: Permanently added" not in stderr_text:
-                logger.warning(f"SSH failed (code {process.returncode}): {stderr_text}")
+                logger.warning(f"SSH command exited {process.returncode}: {stderr_text}")
 
         return stdout.decode().strip()
 
@@ -524,8 +514,3 @@ class RemoteNode:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
         await self.teardown()
-
-    @property
-    def is_connected(self) -> bool:
-        """Check if node is connected."""
-        return self._running and self._authenticated

@@ -21,20 +21,24 @@ class NodesTool(Tool):
     - Executing commands on remote nodes
     """
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = None, node_manager: Optional[NodeManager] = None):
         """
         Initialize the nodes tool.
 
         Args:
             config_path: Optional path to nodes configuration file.
                         If not specified, uses default path.
+            node_manager: Optional shared NodeManager instance.
+                         If provided, uses this instead of creating a new one.
         """
-        if config_path:
+        if node_manager:
+            self.manager = node_manager
+        elif config_path:
             config = NodesConfig.load(config_path)
+            self.manager = NodeManager(config)
         else:
             config = NodesConfig.load(NodesConfig.get_default_config_path())
-
-        self.manager = NodeManager(config)
+            self.manager = NodeManager(config)
 
     @property
     def name(self) -> str:
