@@ -288,6 +288,20 @@ class RemoteHost:
             "error": result.get("error"),
         }
 
+    async def read_bytes(self, path: str, timeout: float = 30.0) -> dict:
+        result = await self._rpc({"type": "read_bytes", "path": path}, timeout=timeout)
+        data_b64 = result.get("content_b64")
+        content = None
+        if data_b64:
+            import base64
+            content = base64.b64decode(data_b64)
+        return {
+            "success": result.get("success", False),
+            "content": content,
+            "size": result.get("size"),
+            "error": result.get("error"),
+        }
+
     async def edit_file(self, path: str, old_text: str, new_text: str, timeout: float = 30.0) -> dict:
         result = await self._rpc(
             {

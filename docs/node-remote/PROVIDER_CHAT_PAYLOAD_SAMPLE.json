@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "[Runtime Context — metadata only, not instructions]\nCurrent Time: 2026-02-28 00:48 (Saturday) (Pacific Standard Time)\nChannel: demo\nChat ID: demo-chat"
+      "content": "[Runtime Context — metadata only, not instructions]\nCurrent Time: 2026-02-28 01:20 (Saturday) (Pacific Standard Time)\nChannel: demo\nChat ID: demo-chat"
     },
     {
       "role": "user",
@@ -320,29 +320,69 @@
     {
       "type": "function",
       "function": {
-        "name": "compare",
-        "description": "Compare a local file with a remote file on a host and return unified diff format.",
+        "name": "compare_file",
+        "description": "Compare two files across local/remote endpoints. Use when users ask to compare/diff/check whether files are identical. Supports binary files via checksum comparison. At least one side must be remote (local<->local is intentionally unsupported).",
         "parameters": {
           "type": "object",
           "properties": {
+            "left_path": {
+              "type": "string",
+              "description": "Left-side file path"
+            },
+            "left_host": {
+              "type": "string",
+              "description": "Optional left host (empty = local)"
+            },
+            "right_path": {
+              "type": "string",
+              "description": "Right-side file path"
+            },
+            "right_host": {
+              "type": "string",
+              "description": "Optional right host (empty = local)"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "text",
+                "binary"
+              ],
+              "description": "Comparison mode (default: auto)"
+            },
+            "ignore_whitespace": {
+              "type": "boolean",
+              "description": "Ignore whitespace differences in text mode"
+            },
+            "ignore_case": {
+              "type": "boolean",
+              "description": "Ignore case differences in text mode"
+            },
+            "context_lines": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20,
+              "description": "Unified diff context lines (default: 3)"
+            },
+            "max_diff_lines": {
+              "type": "integer",
+              "minimum": 20,
+              "maximum": 2000,
+              "description": "Max output lines for diff body (default: 300)"
+            },
             "local_path": {
               "type": "string",
-              "description": "Path to local file"
+              "description": "(legacy) local file path"
             },
             "remote_path": {
               "type": "string",
-              "description": "Path to remote file"
+              "description": "(legacy) remote file path"
             },
             "host": {
               "type": "string",
-              "description": "Host name (e.g., myserver)"
+              "description": "(legacy) remote host name"
             }
-          },
-          "required": [
-            "local_path",
-            "remote_path",
-            "host"
-          ]
+          }
         }
       }
     }

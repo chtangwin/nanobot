@@ -27,6 +27,9 @@ class RemoteExecutionBackend(ExecutionBackend):
     async def write_file(self, path: str, content: str) -> dict[str, Any]:
         return await self.remote_host.write_file(path, content, timeout=30.0)
 
+    async def read_bytes(self, path: str) -> dict[str, Any]:
+        return await self.remote_host.read_bytes(path, timeout=30.0)
+
     async def edit_file(self, path: str, old_text: str, new_text: str) -> dict[str, Any]:
         return await self.remote_host.edit_file(path, old_text, new_text, timeout=30.0)
 

@@ -30,6 +30,7 @@ import time
 import uuid
 import difflib
 import hashlib
+import base64
 from collections import deque
 from pathlib import Path
 
@@ -362,6 +363,24 @@ class FileService:
             return {"success": False, "error": str(e)}
 
     @staticmethod
+    async def read_bytes(path: str) -> dict:
+        try:
+            p = Path(path)
+            if not p.exists():
+                return {"success": False, "error": f"File not found: {path}"}
+            if not p.is_file():
+                return {"success": False, "error": f"Not a file: {path}"}
+            content = p.read_bytes()
+            return {
+                "success": True,
+                "content_b64": base64.b64encode(content).decode("ascii"),
+                "size": len(content),
+                "path": str(p),
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
     async def edit_file(path: str, old_text: str, new_text: str) -> dict:
         try:
             p = Path(path)
@@ -431,11 +450,12 @@ async def handle_connection(
     """Handle WebSocket connection.
 
     Message types:
-        exec      - run a shell command, returns structured result
-        read_file - read file content
-        write_file- write file content
-        edit_file - replace text in file
-        list_dir  - list directory entries
+        exec       - run a shell command, returns structured result
+        read_file  - read file content (text)
+        read_bytes - read file content (raw bytes, base64-encoded)
+        write_file - write file content
+        edit_file  - replace text in file
+        list_dir   - list directory entries
         ping      - health check, returns pong
         close     - close this connection (server stays up)
         shutdown  - gracefully shut down the entire server
@@ -490,6 +510,13 @@ async def handle_connection(
             if not path:
                 return ({"type": "error", "message": "No path provided"}, False)
             result = await FileService.read_file(path)
+            return ({"type": "result", **result}, False)
+
+        if msg_type == "read_bytes":
+            path = data.get("path")
+            if not path:
+                return ({"type": "error", "message": "No path provided"}, False)
+            result = await FileService.read_bytes(path)
             return ({"type": "result", **result}, False)
 
         if msg_type == "write_file":

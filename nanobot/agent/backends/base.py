@@ -22,6 +22,10 @@ class ExecutionBackend(ABC):
         pass
 
     @abstractmethod
+    async def read_bytes(self, path: str) -> dict[str, Any]:
+        pass
+
+    @abstractmethod
     async def edit_file(self, path: str, old_text: str, new_text: str) -> dict[str, Any]:
         pass
 

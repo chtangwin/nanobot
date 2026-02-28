@@ -107,6 +107,20 @@ class LocalExecutionBackend(ExecutionBackend):
         except Exception as e:
             return {"success": False, "error": f"Error writing file: {e}"}
 
+    async def read_bytes(self, path: str) -> dict[str, Any]:
+        try:
+            file_path = self._resolve_path(path)
+            if not file_path.exists():
+                return {"success": False, "error": f"File not found: {path}"}
+            if not file_path.is_file():
+                return {"success": False, "error": f"Not a file: {path}"}
+            content = file_path.read_bytes()
+            return {"success": True, "content": content, "size": len(content), "path": str(file_path)}
+        except PermissionError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"Error reading file bytes: {e}"}
+
     async def edit_file(self, path: str, old_text: str, new_text: str) -> dict[str, Any]:
         try:
             file_path = self._resolve_path(path)
