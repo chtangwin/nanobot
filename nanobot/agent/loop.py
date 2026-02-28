@@ -85,11 +85,7 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
-        self.context = ContextBuilder(
-            workspace,
-            
-            
-        )
+        self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         
@@ -102,12 +98,10 @@ class AgentLoop:
             local_backend=LocalExecutionBackend(
                 workspace=self.workspace,
                 allowed_dir=allowed_dir,
-                
                 path_append=self.exec_config.path_append,
             ),
             host_manager=self.host_manager,
         )
-        
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -118,8 +112,7 @@ class AgentLoop:
             reasoning_effort=reasoning_effort,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
-            restrict_to_workspace=restrict_to_workspace,
-            
+            restrict_to_workspace=restrict_to_workspace,          
         )
 
         self._running = False
