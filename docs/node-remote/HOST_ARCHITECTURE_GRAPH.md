@@ -419,3 +419,20 @@ sequenceDiagram
 - 效果：
   - 网络瞬断时，用户再次发命令通常可无感恢复。
   - 断线重试同一请求不会导致重复写文件/重复执行副作用命令。
+
+---
+
+## 11) 从架构图跳转到“真实 LLM payload”样例
+
+为方便 PR reviewer 将“架构设计”与“LLM 实际看到的输入”对应起来，本分支提供了真实运行时捕获（脱敏）样例：
+
+- `docs/node-remote/PROVIDER_CHAT_PAYLOAD_SAMPLE.json`
+
+建议阅读顺序：
+1. 先看本文件的类图/时序图（理解组件关系与调用路径）
+2. 再看 `PROVIDER_CHAT_PAYLOAD_SAMPLE.json`（验证 `messages + tools` 的真实形态）
+
+重点关注样例中的：
+- `tools[].function.name/description/parameters`（尤其 `host` 参数）
+- `hosts` 工具动作 schema（生命周期管理）
+- `exec/read_file/write_file/edit_file/list_dir` 在同一工具层统一支持远程
