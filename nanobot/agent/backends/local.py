@@ -171,10 +171,21 @@ class LocalExecutionBackend(ExecutionBackend):
             if not dir_path.is_dir():
                 return {"success": False, "error": f"Not a directory: {path}"}
 
-            entries = [
-                {"name": item.name, "is_dir": item.is_dir()}
-                for item in sorted(dir_path.iterdir())
-            ]
+            entries = []
+            for item in sorted(dir_path.iterdir()):
+                try:
+                    st = item.stat()
+                    mtime = int(st.st_mtime)
+                    size = int(st.st_size) if item.is_file() else None
+                except Exception:
+                    mtime = None
+                    size = None
+                entries.append({
+                    "name": item.name,
+                    "is_dir": item.is_dir(),
+                    "size": size,
+                    "mtime": mtime,
+                })
             return {"success": True, "entries": entries}
         except PermissionError as e:
             return {"success": False, "error": str(e)}

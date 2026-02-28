@@ -439,7 +439,11 @@ class CompareDirTool(Tool):
                     }
 
                 abs_child = f"{abs_dir.rstrip('/')}/{name}"
-                meta: dict[str, Any] = {"is_dir": is_dir}
+                meta: dict[str, Any] = {
+                    "is_dir": is_dir,
+                    "size": item.get("size"),
+                    "mtime": item.get("mtime"),
+                }
                 if compare_content and not is_dir:
                     rb = await backend.read_bytes(abs_child)
                     if not rb.get("success"):
@@ -538,27 +542,49 @@ class CompareDirTool(Tool):
         common = sorted(left_keys & right_keys)
 
         type_mismatch = []
-        changed_content = []
+        different_files: list[str] = []
         for key in common:
             l = left_entries[key]
             r = right_entries[key]
             if bool(l.get("is_dir")) != bool(r.get("is_dir")):
                 type_mismatch.append(key)
                 continue
-            if compare_content and not l.get("is_dir"):
-                if l.get("sha256") != r.get("sha256"):
-                    changed_content.append(key)
+
+            if l.get("is_dir"):
+                continue
+
+            if compare_content:
+                left_hash = l.get("sha256")
+                right_hash = r.get("sha256")
+                if left_hash != right_hash:
+                    left_short = (left_hash or "n/a")[:12]
+                    right_short = (right_hash or "n/a")[:12]
+                    different_files.append(
+                        f"{key} checksum(left={left_short}, right={right_short})"
+                    )
+                continue
+
+            details: list[str] = []
+            left_size = l.get("size")
+            right_size = r.get("size")
+            if left_size is not None and right_size is not None and left_size != right_size:
+                details.append(f"size(left={left_size}, right={right_size})")
+
+            left_mtime = l.get("mtime")
+            right_mtime = r.get("mtime")
+            if left_mtime is not None and right_mtime is not None and left_mtime != right_mtime:
+                details.append(f"mtime(left={left_mtime}, right={right_mtime})")
+
+            if details:
+                different_files.append(f"{key} {' '.join(details)}")
 
         left_label = f"{left_host}:{left_path}" if left_host else f"local:{left_path}"
         right_label = f"{right_host}:{right_path}" if right_host else f"local:{right_path}"
 
-        def _sample(items: list[str], cap: int = 20) -> str:
+        def _render_items(items: list[str]) -> str:
             if not items:
                 return "(none)"
-            if len(items) <= cap:
-                return "\n".join(f"  - {x}" for x in items)
-            shown = "\n".join(f"  - {x}" for x in items[:cap])
-            return f"{shown}\n  ... ({len(items) - cap} more)"
+            return "\n".join(f"  - {x}" for x in items)
 
         lines = [
             "Directory comparison summary",
@@ -573,20 +599,23 @@ class CompareDirTool(Tool):
             f"- only in left: {len(only_left)}",
             f"- only in right: {len(only_right)}",
             f"- type mismatch: {len(type_mismatch)}",
-            f"- changed content: {len(changed_content) if compare_content else 'n/a (compare_content=false)'}",
+            f"- different files: {len(different_files)} ({'checksum' if compare_content else 'size/mtime'})",
             "",
-            "Sample - only in left:",
-            _sample(only_left),
+            "Only in left:",
+            _render_items(only_left),
             "",
-            "Sample - only in right:",
-            _sample(only_right),
+            "Only in right:",
+            _render_items(only_right),
             "",
-            "Sample - type mismatch:",
-            _sample(type_mismatch),
+            "Type mismatch:",
+            _render_items(type_mismatch),
         ]
 
-        if compare_content:
-            lines += ["", "Sample - changed content:", _sample(changed_content)]
+        lines += [
+            "",
+            f"Different files ({'checksum' if compare_content else 'size/mtime'}):",
+            _render_items(different_files),
+        ]
 
         lines += [
             "",

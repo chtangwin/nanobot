@@ -126,6 +126,24 @@ async def test_compare_dir_aborts_when_entry_limit_exceeded():
 
 
 @pytest.mark.asyncio
+async def test_compare_dir_reports_metadata_differences_in_structure_mode():
+    left = FakeBackend(
+        tree={"/left": [{"name": "config.json", "is_dir": False, "size": 120, "mtime": 10}]}
+    )
+    right = FakeBackend(
+        tree={"/right": [{"name": "config.json", "is_dir": False, "size": 140, "mtime": 22}]}
+    )
+
+    router = FakeRouter(local_backend=FakeBackend(), remote_backends={"l": left, "r": right})
+    tool = CompareDirTool(router)
+
+    result = await tool.execute(left_host="l", left_path="/left", right_host="r", right_path="/right")
+
+    assert "- different files: 1 (size/mtime)" in result
+    assert "config.json size(left=120, right=140) mtime(left=10, right=22)" in result
+
+
+@pytest.mark.asyncio
 async def test_compare_dir_compare_content_hash_reports_changed_files():
     left = FakeBackend(
         tree={"/left": [{"name": "same.bin", "is_dir": False}, {"name": "diff.bin", "is_dir": False}]},
@@ -154,5 +172,5 @@ async def test_compare_dir_compare_content_hash_reports_changed_files():
     )
 
     assert "mode: content-hash" in result
-    assert "- changed content: 1" in result
-    assert "diff.bin" in result
+    assert "- different files: 1 (checksum)" in result
+    assert "diff.bin checksum(" in result
