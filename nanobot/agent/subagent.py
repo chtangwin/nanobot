@@ -8,6 +8,7 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.agent.backends import ExecutionBackendRouter, LocalExecutionBackend
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -93,15 +94,24 @@ class SubagentManager:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
             allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, block_sensitive_files=self.block_sensitive_files))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir, block_sensitive_files=self.block_sensitive_files))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir, block_sensitive_files=self.block_sensitive_files))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir, block_sensitive_files=self.block_sensitive_files))
+            backend_router = ExecutionBackendRouter(
+                local_backend=LocalExecutionBackend(
+                    workspace=self.workspace,
+                    allowed_dir=allowed_dir,
+                    block_sensitive_files=self.block_sensitive_files,
+                    path_append=self.exec_config.path_append,
+                ),
+                node_manager=None,
+            )
+            tools.register(ReadFileTool(backend_router))
+            tools.register(WriteFileTool(backend_router))
+            tools.register(EditFileTool(backend_router))
+            tools.register(ListDirTool(backend_router))
             tools.register(ExecTool(
+                backend_router=backend_router,
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
-                path_append=self.exec_config.path_append,
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())

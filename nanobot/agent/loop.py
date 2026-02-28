@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent.backends import ExecutionBackendRouter, LocalExecutionBackend
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
@@ -93,9 +94,20 @@ class AgentLoop:
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         
-        # Initialize NodeManager for remote node support
+        # Initialize NodeManager for remote host support (connection lifecycle only)
         nodes_config = NodesConfig.load(NodesConfig.get_default_config_path())
         self.node_manager = NodeManager(nodes_config)
+
+        allowed_dir = self.workspace if self.restrict_to_workspace else None
+        self.backend_router = ExecutionBackendRouter(
+            local_backend=LocalExecutionBackend(
+                workspace=self.workspace,
+                allowed_dir=allowed_dir,
+                block_sensitive_files=self.block_sensitive_files,
+                path_append=self.exec_config.path_append,
+            ),
+            node_manager=self.node_manager,
+        )
         
         self.subagents = SubagentManager(
             provider=provider,
@@ -124,39 +136,18 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
-
-        # Filesystem tools - only those that support node_manager
-        self.tools.register(ReadFileTool(
-            workspace=self.workspace,
-            allowed_dir=allowed_dir,
-            block_sensitive_files=self.block_sensitive_files,
-            node_manager=self.node_manager,
-        ))
-        self.tools.register(WriteFileTool(
-            workspace=self.workspace,
-            allowed_dir=allowed_dir,
-            block_sensitive_files=self.block_sensitive_files,
-            node_manager=self.node_manager,
-        ))
-        self.tools.register(EditFileTool(
-            workspace=self.workspace,
-            allowed_dir=allowed_dir,
-            block_sensitive_files=self.block_sensitive_files,
-        ))
-        self.tools.register(ListDirTool(
-            workspace=self.workspace,
-            allowed_dir=allowed_dir,
-            block_sensitive_files=self.block_sensitive_files,
-        ))
+        # Filesystem tools
+        self.tools.register(ReadFileTool(self.backend_router))
+        self.tools.register(WriteFileTool(self.backend_router))
+        self.tools.register(EditFileTool(self.backend_router))
+        self.tools.register(ListDirTool(self.backend_router))
 
         # Shell execution tool
         self.tools.register(ExecTool(
+            backend_router=self.backend_router,
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
-            path_append=self.exec_config.path_append,
-            node_manager=self.node_manager,
         ))
 
         # Other tools
@@ -165,7 +156,7 @@ class AgentLoop:
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         self.tools.register(NodesTool(node_manager=self.node_manager))
-        self.tools.register(CompareTool(node_manager=self.node_manager))
+        self.tools.register(CompareTool(self.backend_router))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 

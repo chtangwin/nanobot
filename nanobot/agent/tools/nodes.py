@@ -278,13 +278,14 @@ Examples:
             return "Error: 'command' parameter is required for exec action"
 
         try:
-            result = await self.manager.execute(command, host=name, timeout=timeout)
+            remote_node = await self.manager.get_or_connect(name)
+            result = await remote_node.exec(command, timeout=timeout)
 
             if result["success"]:
-                output = result["output"] or "(no output)"
+                output = result.get("output") or "(no output)"
                 return f"✓ Command executed successfully on '{name}':\n\n{output}"
             else:
-                error = result["error"] or "Unknown error"
+                error = result.get("error") or "Unknown error"
                 return f"✗ Command failed on '{name}':\n\n{error}"
 
         except KeyError:

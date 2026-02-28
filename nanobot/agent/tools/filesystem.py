@@ -1,54 +1,17 @@
-"""File system tools: read, write, edit."""
+"""File system tools: read, write, edit, list, compare."""
+
+from __future__ import annotations
 
 import difflib
-from pathlib import Path
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any
 
+from nanobot.agent.backends.router import ExecutionBackendRouter
 from nanobot.agent.tools.base import Tool
-from nanobot.agent.tools.redaction import is_sensitive_path
-
-if TYPE_CHECKING:
-    from nanobot.nodes.manager import NodeManager
-
-
-def _resolve_path(
-    path: str,
-    workspace: Path | None = None,
-    allowed_dir: Path | None = None,
-    block_sensitive: bool = True,
-) -> Path:
-    """Resolve path against workspace (if relative) and enforce directory restriction."""
-    p = Path(path).expanduser()
-    if not p.is_absolute() and workspace:
-        p = workspace / p
-    resolved = p.resolve()
-
-    # Block sensitive files (pass Path object directly)
-    if block_sensitive and is_sensitive_path(resolved):
-        raise PermissionError(f"Access to sensitive path is blocked by redaction policy: {path}")
-    
-    if allowed_dir:
-        try:
-            resolved.relative_to(allowed_dir.resolve())
-        except ValueError:
-            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
-    return resolved
 
 
 class ReadFileTool(Tool):
-    """Tool to read file contents."""
-
-    def __init__(
-        self,
-        workspace: Path | None = None,
-        allowed_dir: Path | None = None,
-        block_sensitive_files: bool = True,
-        node_manager: "NodeManager | None" = None,
-    ):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
-        self._block_sensitive = block_sensitive_files
-        self._node_manager = node_manager
+    def __init__(self, backend_router: ExecutionBackendRouter):
+        self.backend_router = backend_router
 
     @property
     def name(self) -> str:
@@ -56,90 +19,35 @@ class ReadFileTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Read the contents of a file at the given path. Can read from remote hosts by specifying the 'host' parameter."
+        return "Read the contents of a file. Use host to read from a remote host."
 
     @property
     def parameters(self) -> dict[str, Any]:
-        props = {
+        return {
             "type": "object",
             "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The file path to read"
-                }
+                "path": {"type": "string", "description": "The file path to read"},
+                "host": {"type": "string", "description": "Optional remote host name"},
             },
-            "required": ["path"]
+            "required": ["path"],
         }
 
-        if self._node_manager is not None:
-            props["properties"]["host"] = {
-                "type": "string",
-                "description": "Optional remote host name to read from. If not specified, reads locally."
-            }
-
-        return props
-
-    async def execute(self, path: str, host: Union[str, None] = None, **kwargs: Any) -> str:
-        # Handle remote host read
-        if host and self._node_manager:
-            return await self._read_remote(path, host)
-
-        # Local read
-        return await self._read_local(path)
-
-    async def _read_local(self, path: str) -> str:
-        """Read file locally."""
+    async def execute(self, path: str, host: str | None = None, **kwargs: Any) -> str:
         try:
-            file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
-            if not file_path.exists():
-                return f"Error: File not found: {path}"
-            if not file_path.is_file():
-                return f"Error: Not a file: {path}"
-
-            content = file_path.read_text(encoding="utf-8")
-            return content
-        except PermissionError as e:
-            return f"Error: {e}"
-        except Exception as e:
-            return f"Error reading file: {str(e)}"
-
-    async def _read_remote(self, path: str, host: str) -> str:
-        """Read file from remote host."""
-        if not self._node_manager:
-            return "Error: Node manager not available"
-
-        try:
-            result = await self._node_manager.execute(
-                f"cat '{path}'",
-                host=host,
-                timeout=30.0,
-            )
-
-            if result["success"]:
-                return result["output"] or ""
-            else:
-                return f"Error: {result['error'] or 'Failed to read file'}"
-
+            backend = await self.backend_router.resolve(host)
+            result = await backend.read_file(path)
+            if result.get("success"):
+                return result.get("content") or ""
+            return f"Error: {result.get('error') or 'Failed to read file'}"
         except KeyError:
             return f"Error: Host '{host}' not found"
         except Exception as e:
-            return f"Error reading file from remote host: {str(e)}"
+            return f"Error reading file: {e}"
 
 
 class WriteFileTool(Tool):
-    """Tool to write content to a file."""
-
-    def __init__(
-        self,
-        workspace: Path | None = None,
-        allowed_dir: Path | None = None,
-        block_sensitive_files: bool = True,
-        node_manager: "NodeManager | None" = None,
-    ):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
-        self._block_sensitive = block_sensitive_files
-        self._node_manager = node_manager
+    def __init__(self, backend_router: ExecutionBackendRouter):
+        self.backend_router = backend_router
 
     @property
     def name(self) -> str:
@@ -147,316 +55,170 @@ class WriteFileTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Write content to a file at the given path. Creates parent directories if needed. Can write to remote hosts by specifying the 'host' parameter."
+        return "Write content to a file. Use host to write to a remote host."
 
     @property
     def parameters(self) -> dict[str, Any]:
-        props = {
+        return {
             "type": "object",
             "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The file path to write to"
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The content to write"
-                }
+                "path": {"type": "string", "description": "The file path to write to"},
+                "content": {"type": "string", "description": "The content to write"},
+                "host": {"type": "string", "description": "Optional remote host name"},
             },
-            "required": ["path", "content"]
+            "required": ["path", "content"],
         }
 
-        if self._node_manager is not None:
-            props["properties"]["host"] = {
-                "type": "string",
-                "description": "Optional remote host name to write to. If not specified, writes locally."
-            }
-
-        return props
-
-    async def execute(self, path: str, content: str, host: Union[str, None] = None, **kwargs: Any) -> str:
-        # Handle remote host write
-        if host and self._node_manager:
-            return await self._write_remote(path, content, host)
-
-        # Local write
-        return await self._write_local(path, content)
-
-    async def _write_local(self, path: str, content: str) -> str:
-        """Write file locally."""
+    async def execute(self, path: str, content: str, host: str | None = None, **kwargs: Any) -> str:
         try:
-            file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(content, encoding="utf-8")
-            return f"Successfully wrote {len(content)} bytes to {file_path}"
-        except PermissionError as e:
-            return f"Error: {e}"
-        except Exception as e:
-            return f"Error writing file: {str(e)}"
-
-    async def _write_remote(self, path: str, content: str, host: str) -> str:
-        """Write file to remote host."""
-        if not self._node_manager:
-            return "Error: Node manager not available"
-
-        try:
-            import base64
-
-            # Encode content to base64 to avoid shell escaping issues
-            encoded = base64.b64encode(content.encode()).decode()
-
-            result = await self._node_manager.execute(
-                f"mkdir -p \"$(dirname '{path}')\" && echo '{encoded}' | base64 -d > '{path}'",
-                host=host,
-                timeout=30.0,
-            )
-
-            if result["success"]:
-                return f"Successfully wrote {len(content)} bytes to {path} on host '{host}'"
-            else:
-                return f"Error: {result['error'] or 'Failed to write file'}"
-
+            backend = await self.backend_router.resolve(host)
+            result = await backend.write_file(path, content)
+            if result.get("success"):
+                if host:
+                    return f"Successfully wrote {len(content)} bytes to {path} on host '{host}'"
+                return f"Successfully wrote {len(content)} bytes to {result.get('path', path)}"
+            return f"Error: {result.get('error') or 'Failed to write file'}"
         except KeyError:
             return f"Error: Host '{host}' not found"
         except Exception as e:
-            return f"Error writing file to remote host: {str(e)}"
+            return f"Error writing file: {e}"
 
 
 class EditFileTool(Tool):
-    """Tool to edit a file by replacing text."""
-
-    def __init__(
-        self,
-        workspace: Path | None = None,
-        allowed_dir: Path | None = None,
-        block_sensitive_files: bool = True,
-    ):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
-        self._block_sensitive = block_sensitive_files
+    def __init__(self, backend_router: ExecutionBackendRouter):
+        self.backend_router = backend_router
 
     @property
     def name(self) -> str:
         return "edit_file"
-    
+
     @property
     def description(self) -> str:
-        return "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file."
-    
+        return "Edit a file by replacing old_text with new_text."
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The file path to edit"
-                },
-                "old_text": {
-                    "type": "string",
-                    "description": "The exact text to find and replace"
-                },
-                "new_text": {
-                    "type": "string",
-                    "description": "The text to replace with"
-                }
+                "path": {"type": "string", "description": "The file path to edit"},
+                "old_text": {"type": "string", "description": "Exact text to replace"},
+                "new_text": {"type": "string", "description": "Replacement text"},
+                "host": {"type": "string", "description": "Optional remote host name"},
             },
-            "required": ["path", "old_text", "new_text"]
+            "required": ["path", "old_text", "new_text"],
         }
-    
-    async def execute(self, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
+
+    async def execute(
+        self,
+        path: str,
+        old_text: str,
+        new_text: str,
+        host: str | None = None,
+        **kwargs: Any,
+    ) -> str:
         try:
-            file_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
-            if not file_path.exists():
-                return f"Error: File not found: {path}"
-
-            content = file_path.read_text(encoding="utf-8")
-
-            if old_text not in content:
-                return self._not_found_message(old_text, content, path)
-
-            # Count occurrences
-            count = content.count(old_text)
-            if count > 1:
-                return f"Warning: old_text appears {count} times. Please provide more context to make it unique."
-
-            new_content = content.replace(old_text, new_text, 1)
-            file_path.write_text(new_content, encoding="utf-8")
-
-            return f"Successfully edited {file_path}"
-        except PermissionError as e:
-            return f"Error: {e}"
+            backend = await self.backend_router.resolve(host)
+            result = await backend.edit_file(path, old_text, new_text)
+            if result.get("success"):
+                return f"Successfully edited {result.get('path', path)}"
+            return f"Error: {result.get('error') or 'Failed to edit file'}"
+        except KeyError:
+            return f"Error: Host '{host}' not found"
         except Exception as e:
-            return f"Error editing file: {str(e)}"
-
-    @staticmethod
-    def _not_found_message(old_text: str, content: str, path: str) -> str:
-        """Build a helpful error when old_text is not found."""
-        lines = content.splitlines(keepends=True)
-        old_lines = old_text.splitlines(keepends=True)
-        window = len(old_lines)
-
-        best_ratio, best_start = 0.0, 0
-        for i in range(max(1, len(lines) - window + 1)):
-            ratio = difflib.SequenceMatcher(None, old_lines, lines[i : i + window]).ratio()
-            if ratio > best_ratio:
-                best_ratio, best_start = ratio, i
-
-        if best_ratio > 0.5:
-            diff = "\n".join(difflib.unified_diff(
-                old_lines, lines[best_start : best_start + window],
-                fromfile="old_text (provided)", tofile=f"{path} (actual, line {best_start + 1})",
-                lineterm="",
-            ))
-            return f"Error: old_text not found in {path}.\nBest match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
-        return f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+            return f"Error editing file: {e}"
 
 
 class ListDirTool(Tool):
-    """Tool to list directory contents."""
-
-    def __init__(
-        self,
-        workspace: Path | None = None,
-        allowed_dir: Path | None = None,
-        block_sensitive_files: bool = True,
-    ):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
-        self._block_sensitive = block_sensitive_files
+    def __init__(self, backend_router: ExecutionBackendRouter):
+        self.backend_router = backend_router
 
     @property
     def name(self) -> str:
         return "list_dir"
-    
+
     @property
     def description(self) -> str:
-        return "List the contents of a directory."
-    
+        return "List directory contents. Use host to list on a remote host."
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The directory path to list"
-                }
+                "path": {"type": "string", "description": "The directory path to list"},
+                "host": {"type": "string", "description": "Optional remote host name"},
             },
-            "required": ["path"]
+            "required": ["path"],
         }
-    
-    async def execute(self, path: str, **kwargs: Any) -> str:
+
+    async def execute(self, path: str, host: str | None = None, **kwargs: Any) -> str:
         try:
-            dir_path = _resolve_path(path, self._workspace, self._allowed_dir, self._block_sensitive)
-            if not dir_path.exists():
-                return f"Error: Directory not found: {path}"
-            if not dir_path.is_dir():
-                return f"Error: Not a directory: {path}"
+            backend = await self.backend_router.resolve(host)
+            result = await backend.list_dir(path)
+            if not result.get("success"):
+                return f"Error: {result.get('error') or 'Failed to list directory'}"
 
-            items = []
-            for item in sorted(dir_path.iterdir()):
-                prefix = "📁 " if item.is_dir() else "📄 "
-                items.append(f"{prefix}{item.name}")
-
-            if not items:
+            entries = result.get("entries") or []
+            if not entries:
                 return f"Directory {path} is empty"
 
-            return "\n".join(items)
-        except PermissionError as e:
-            return f"Error: {e}"
+            lines = []
+            for entry in entries:
+                prefix = "📁 " if entry.get("is_dir") else "📄 "
+                lines.append(f"{prefix}{entry.get('name', '')}")
+            return "\n".join(lines)
+        except KeyError:
+            return f"Error: Host '{host}' not found"
         except Exception as e:
-            return f"Error listing directory: {str(e)}"
+            return f"Error listing directory: {e}"
 
 
 class CompareTool(Tool):
-    """Compare local and remote files using diff."""
-
     name = "compare"
-    description = "Compare a local file with a remote file on a host. " \
-                  "Use this when you want to see differences between files. " \
-                  "Returns unified diff format."
+    description = (
+        "Compare a local file with a remote file on a host and return unified diff format."
+    )
     parameters = {
         "type": "object",
         "properties": {
-            "local_path": {
-                "type": "string",
-                "description": "Path to local file",
-            },
-            "remote_path": {
-                "type": "string",
-                "description": "Path to remote file",
-            },
-            "host": {
-                "type": "string",
-                "description": "Host name (e.g., 'myserver')",
-            },
+            "local_path": {"type": "string", "description": "Path to local file"},
+            "remote_path": {"type": "string", "description": "Path to remote file"},
+            "host": {"type": "string", "description": "Host name (e.g., myserver)"},
         },
-        "required": ["local_path", "remote_path", "host"]
+        "required": ["local_path", "remote_path", "host"],
     }
 
-    def __init__(
-        self,
-        workspace: Union[Path, None] = None,
-        allowed_dir: Union[Path, None] = None,
-        block_sensitive: bool = True,
-        node_manager: Union["NodeManager", None] = None,
-    ):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
-        self._block_sensitive = block_sensitive
-        self._node_manager = node_manager
+    def __init__(self, backend_router: ExecutionBackendRouter):
+        self.backend_router = backend_router
 
-    def set_node_manager(self, node_manager: "NodeManager"):
-        self._node_manager = node_manager
-
-    async def execute(
-        self,
-        local_path: str,
-        remote_path: str,
-        host: str,
-        **kwargs: Any
-    ) -> str:
-        # Read local file
+    async def execute(self, local_path: str, remote_path: str, host: str, **kwargs: Any) -> str:
         try:
-            local_file = _resolve_path(local_path, self._workspace, self._allowed_dir, self._block_sensitive)
-            local_content = local_file.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return f"Error: Local file not found: {local_path}"
-        except PermissionError as e:
-            return f"Error: {e}"
+            local_backend = await self.backend_router.resolve(None)
+            remote_backend = await self.backend_router.resolve(host)
+
+            local_result = await local_backend.read_file(local_path)
+            if not local_result.get("success"):
+                return f"Error reading local file: {local_result.get('error')}"
+
+            remote_result = await remote_backend.read_file(remote_path)
+            if not remote_result.get("success"):
+                return f"Error reading remote file: {remote_result.get('error')}"
+
+            local_lines = (local_result.get("content") or "").splitlines()
+            remote_lines = (remote_result.get("content") or "").splitlines()
+
+            diff = list(difflib.unified_diff(
+                local_lines,
+                remote_lines,
+                fromfile=f"local:{local_path}",
+                tofile=f"remote:{host}:{remote_path}",
+                lineterm="",
+            ))
+            if not diff:
+                return f"Files are identical: {local_path} == {host}:{remote_path}"
+            return "Files differ:\n" + "\n".join(diff)
+        except KeyError:
+            return f"Error: Host '{host}' not found"
         except Exception as e:
-            return f"Error reading local file: {str(e)}"
-
-        # Read remote file via host
-        if not self._node_manager:
-            return "Error: Node manager not available"
-
-        try:
-            result = await self._node_manager.execute(
-                f"cat '{remote_path}'",
-                host=host,
-                timeout=30.0,
-            )
-            if not result.get("success"):
-                return f"Error reading remote file: {result.get('error')}"
-            remote_content = result.get("output", "")
-        except Exception as e:
-            return f"Error reading remote file: {str(e)}"
-
-        # Compare using difflib
-        local_lines = local_content.splitlines()
-        remote_lines = remote_content.splitlines()
-
-        diff = list(difflib.unified_diff(
-            local_lines,
-            remote_lines,
-            fromfile=f"local:{local_path}",
-            tofile=f"remote:{host}:{remote_path}",
-            lineterm=""
-        ))
-
-        if not diff:
-            return f"Files are identical: {local_path} == {host}:{remote_path}"
-
-        return "Files differ:\n" + "\n".join(diff)
+            return f"Error comparing files: {e}"
