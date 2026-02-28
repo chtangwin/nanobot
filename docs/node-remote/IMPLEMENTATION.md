@@ -231,7 +231,36 @@ _write_remote(path, content, host)
   └─ 返回结果
 ```
 
-**CompareTool**：比较本地和远程文件，输出 unified diff 格式。
+**CompareFileTool (`compare_file`)**：通用文件比较工具。
+- 支持 `local↔remote`、`remote↔remote`
+- 不支持 `local↔local`（避免与本地日常 diff 语义冲突）
+- 文本文件：输出 unified diff
+- 二进制文件：输出 checksum（sha256）比较结果
+
+**CompareDirTool (`compare_dir`)**：目录级高层摘要比较（不做逐文件文本 diff）。
+- 支持 `local↔remote`、`remote↔remote`
+- 默认 `recursive=true`
+- 默认 `max_entries=500`（超限立即返回摘要，不继续）
+- 默认 `compare_content=false`（可选 `true` 用 hash 做内容级摘要）
+- `ignore_globs` 支持用户传入，并在结果末尾标注忽略规则来源（user/.gitignore/defaults）
+
+**使用示例（给 LLM/用户）**：
+```text
+# 目录级摘要（部署后快速对比）
+compare_dir left_host="staging" left_path="/app/config" right_host="prod" right_path="/app/config"
+
+# 目录级摘要 + 忽略规则
+compare_dir left_host="staging" left_path="/app" right_host="prod" right_path="/app" ignore_globs=["*.log", "tmp/**"]
+
+# 目录级摘要 + 内容哈希（不输出逐文件 diff）
+compare_dir left_host="staging" left_path="/app" right_host="prod" right_path="/app" compare_content=true
+
+# 文件级深入比对（文本）
+compare_file left_host="staging" left_path="/app/config.yaml" right_host="prod" right_path="/app/config.yaml"
+
+# 文件级二进制校验
+compare_file left_path="./release.tar.gz" right_host="prod" right_path="/tmp/release.tar.gz" mode="binary"
+```
 
 ### nanobot/remote/remote_server.py
 
