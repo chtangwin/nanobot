@@ -244,22 +244,27 @@ _write_remote(path, content, host)
 - 默认 `compare_content=false`（可选 `true` 用 hash 做内容级摘要）
 - `ignore_globs` 支持用户传入，并在结果末尾标注忽略规则来源（user/.gitignore/defaults）
 
-**使用示例（给 LLM/用户）**：
+**使用示例（自然语言 → 工具调用）**：
 ```text
-# 目录级摘要（部署后快速对比）
-compare_dir left_host="staging" left_path="/app/config" right_host="prod" right_path="/app/config"
+# 1) 目录级摘要（部署后快速对比）
+用户："帮我对比 staging 和 prod 的 /app/config，有哪些新增/删除就行。"
+工具：compare_dir left_host="staging" left_path="/app/config" right_host="prod" right_path="/app/config"
 
-# 目录级摘要 + 忽略规则
-compare_dir left_host="staging" left_path="/app" right_host="prod" right_path="/app" ignore_globs=["*.log", "tmp/**"]
+# 2) 目录级摘要 + 忽略规则
+用户："比较 staging 和 prod 的 /app，但忽略日志和 tmp 目录。"
+工具：compare_dir left_host="staging" left_path="/app" right_host="prod" right_path="/app" ignore_globs=["*.log", "tmp/**"]
 
-# 目录级摘要 + 内容哈希（不输出逐文件 diff）
-compare_dir left_host="staging" left_path="/app" right_host="prod" right_path="/app" compare_content=true
+# 3) 目录级摘要 + 内容哈希（不输出逐文件 diff）
+用户："按内容校验 staging/prod 的 /app 是否一致，先给我摘要。"
+工具：compare_dir left_host="staging" left_path="/app" right_host="prod" right_path="/app" compare_content=true
 
-# 文件级深入比对（文本）
-compare_file left_host="staging" left_path="/app/config.yaml" right_host="prod" right_path="/app/config.yaml"
+# 4) 文件级深入比对（文本）
+用户："详细比较 staging 和 prod 的 config.yaml 差异。"
+工具：compare_file left_host="staging" left_path="/app/config.yaml" right_host="prod" right_path="/app/config.yaml"
 
-# 文件级二进制校验
-compare_file left_path="./release.tar.gz" right_host="prod" right_path="/tmp/release.tar.gz" mode="binary"
+# 5) 文件级二进制校验
+用户："检查本地 release.tar.gz 和 prod 上 /tmp/release.tar.gz 是否完全一致（按校验和）。"
+工具：compare_file left_path="./release.tar.gz" right_host="prod" right_path="/tmp/release.tar.gz" mode="binary"
 ```
 
 ### nanobot/remote/remote_server.py
