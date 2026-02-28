@@ -436,6 +436,9 @@ test_remote_node_config()
 - [ ] 验证会话保持
 - [ ] 读取远程文件
 - [ ] 写入远程文件
+- [ ] 模拟本地传输断开后执行命令（应自动恢复且 session 不变）
+- [ ] 使用相同 request_id 重试同一 payload（应返回缓存结果）
+- [ ] 使用相同 request_id 发送不同 payload（应返回冲突错误）
 - [ ] 断开连接
 - [ ] 验证清理（无 /tmp 文件残留）
 

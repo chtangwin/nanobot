@@ -144,8 +144,32 @@ async def test():
         print(f"  ❌ idempotency test failed: {e}")
         errors.append(f"idempotency test failed: {e}")
 
-    # ── 6. Get remote log ────────────────────────────────────
-    section(6, "remote server log (last 10 lines)")
+    # ── 6. request_id 冲突保护（同 ID 不同 payload）───────────
+    section(6, "idempotency guard: same request_id + different payload should fail")
+    try:
+        guard_id = "idem-e2e-guard-001"
+        cmd_a = "echo guard-A"
+        cmd_b = "echo guard-B"
+
+        first_ok = await host._rpc({"type": "exec", "command": cmd_a, "request_id": guard_id}, timeout=15.0)
+        second_conflict = await host._rpc({"type": "exec", "command": cmd_b, "request_id": guard_id}, timeout=15.0)
+
+        out_ok = (first_ok.get("output") or "").strip()
+        err_conflict = (second_conflict.get("error") or "").strip()
+        is_guarded = (out_ok == "guard-A") and ("different payload" in err_conflict)
+
+        print(f"  first result   = {out_ok}")
+        print(f"  conflict error = {err_conflict}")
+        print(f"  {'✅' if is_guarded else '❌'} conflict guard effective")
+
+        if not is_guarded:
+            errors.append("idempotency guard failed: same request_id accepted different payload")
+    except Exception as e:
+        print(f"  ❌ idempotency guard test failed: {e}")
+        errors.append(f"idempotency guard test failed: {e}")
+
+    # ── 7. Get remote log ────────────────────────────────────
+    section(7, "remote server log (last 10 lines)")
     try:
         log = await host._get_remote_log(tail_lines=10)
         for line in log.strip().split("\n"):
@@ -153,8 +177,8 @@ async def test():
     except Exception as e:
         print(f"  ⚠️  Could not get log: {e}")
 
-    # ── 7. Teardown (graceful shutdown) ──────────────────────
-    section(7, "teardown() — graceful shutdown")
+    # ── 8. Teardown (graceful shutdown) ──────────────────────
+    section(8, "teardown() — graceful shutdown")
     t0 = time.time()
     try:
         await host.teardown()
@@ -166,8 +190,8 @@ async def test():
         import traceback; traceback.print_exc()
         errors.append(f"teardown() failed: {e}")
 
-    # ── 8. Verify cleanup on remote ─────────────────────────
-    section(8, "verify remote cleanup")
+    # ── 9. Verify cleanup on remote ─────────────────────────
+    section(9, "verify remote cleanup")
     try:
         remote_check = (
             f"if [ -d /tmp/{session_id} ]; then echo DIR_CHECK=EXISTS; else echo DIR_CHECK=GONE; fi; "
