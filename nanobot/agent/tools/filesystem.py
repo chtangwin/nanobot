@@ -607,6 +607,7 @@ class CompareDirTool(Tool):
         lines.extend(f"DIFF_FILE {p}" for p in different_files)
 
         lines += [
+            "[/FULL DIFF]",
             "",
             "SUMMARY "
             f"only_left={len(only_left)} "
@@ -637,11 +638,12 @@ class CompareDirTool(Tool):
         right_ignored = right_scan.get("ignored_count", 0)
         status_line = "⚠️ Asymmetric ignore rules applied" if ignore_cfg.get("asymmetric") else "✅ Symmetric ignore rules"
         return (
-            "[IMPORTANT - SHOW TO USER]",
+            "[SHOW TO USER]\n"
             "🧹 Ignore rules:\n"
             f"- Left  ({left_source}): {left_ignored} entries ignored\n"
             f"- Right ({right_source}): {right_ignored} entries ignored\n"
-            f"{status_line}"
+            f"{status_line}\n"
+            "[/SHOW TO USER]"
         )
 
 
