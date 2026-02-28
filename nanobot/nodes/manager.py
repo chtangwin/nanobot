@@ -144,29 +144,29 @@ class NodeManager:
     async def execute(
         self,
         command: str,
-        node: str,
+        host: str,
         timeout: float = 30.0,
     ) -> dict:
         """
-        Execute a command on a remote node.
+        Execute a command on a remote host.
 
         Args:
             command: Command to execute.
-            node: Node name to execute on.
+            host: Host name to execute on.
             timeout: Command timeout in seconds.
 
         Returns:
             Result dictionary with 'success', 'output', and 'error' keys.
 
         Raises:
-            KeyError: If node not found.
+            KeyError: If host not found.
             ConnectionError: If connection fails.
         """
-        remote_node = self._connections.get(node)
+        remote_node = self._connections.get(host)
 
         if not remote_node or not remote_node.is_connected:
             # Auto-connect if not connected
-            remote_node = await self.connect(node)
+            remote_node = await self.connect(host)
 
         return await remote_node.execute(command, timeout=timeout)
 

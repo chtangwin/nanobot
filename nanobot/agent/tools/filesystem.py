@@ -56,7 +56,7 @@ class ReadFileTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Read the contents of a file at the given path. Can read from remote nodes by specifying the 'node' parameter."
+        return "Read the contents of a file at the given path. Can read from remote hosts by specifying the 'host' parameter."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -72,17 +72,17 @@ class ReadFileTool(Tool):
         }
 
         if self._node_manager is not None:
-            props["properties"]["node"] = {
+            props["properties"]["host"] = {
                 "type": "string",
-                "description": "Optional remote node name to read from. If not specified, reads locally."
+                "description": "Optional remote host name to read from. If not specified, reads locally."
             }
 
         return props
 
-    async def execute(self, path: str, node: Union[str, None] = None, **kwargs: Any) -> str:
-        # Handle remote node read
-        if node and self._node_manager:
-            return await self._read_remote(path, node)
+    async def execute(self, path: str, host: Union[str, None] = None, **kwargs: Any) -> str:
+        # Handle remote host read
+        if host and self._node_manager:
+            return await self._read_remote(path, host)
 
         # Local read
         return await self._read_local(path)
@@ -103,15 +103,15 @@ class ReadFileTool(Tool):
         except Exception as e:
             return f"Error reading file: {str(e)}"
 
-    async def _read_remote(self, path: str, node: str) -> str:
-        """Read file from remote node."""
+    async def _read_remote(self, path: str, host: str) -> str:
+        """Read file from remote host."""
         if not self._node_manager:
             return "Error: Node manager not available"
 
         try:
             result = await self._node_manager.execute(
                 f"cat '{path}'",
-                node=node,
+                host=host,
                 timeout=30.0,
             )
 
@@ -121,9 +121,9 @@ class ReadFileTool(Tool):
                 return f"Error: {result['error'] or 'Failed to read file'}"
 
         except KeyError:
-            return f"Error: Node '{node}' not found"
+            return f"Error: Host '{host}' not found"
         except Exception as e:
-            return f"Error reading file from remote node: {str(e)}"
+            return f"Error reading file from remote host: {str(e)}"
 
 
 class WriteFileTool(Tool):
@@ -147,7 +147,7 @@ class WriteFileTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Write content to a file at the given path. Creates parent directories if needed. Can write to remote nodes by specifying the 'node' parameter."
+        return "Write content to a file at the given path. Creates parent directories if needed. Can write to remote hosts by specifying the 'host' parameter."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -167,17 +167,17 @@ class WriteFileTool(Tool):
         }
 
         if self._node_manager is not None:
-            props["properties"]["node"] = {
+            props["properties"]["host"] = {
                 "type": "string",
-                "description": "Optional remote node name to write to. If not specified, writes locally."
+                "description": "Optional remote host name to write to. If not specified, writes locally."
             }
 
         return props
 
-    async def execute(self, path: str, content: str, node: Union[str, None] = None, **kwargs: Any) -> str:
-        # Handle remote node write
-        if node and self._node_manager:
-            return await self._write_remote(path, content, node)
+    async def execute(self, path: str, content: str, host: Union[str, None] = None, **kwargs: Any) -> str:
+        # Handle remote host write
+        if host and self._node_manager:
+            return await self._write_remote(path, content, host)
 
         # Local write
         return await self._write_local(path, content)
@@ -194,8 +194,8 @@ class WriteFileTool(Tool):
         except Exception as e:
             return f"Error writing file: {str(e)}"
 
-    async def _write_remote(self, path: str, content: str, node: str) -> str:
-        """Write file to remote node."""
+    async def _write_remote(self, path: str, content: str, host: str) -> str:
+        """Write file to remote host."""
         if not self._node_manager:
             return "Error: Node manager not available"
 
@@ -207,19 +207,19 @@ class WriteFileTool(Tool):
 
             result = await self._node_manager.execute(
                 f"mkdir -p \"$(dirname '{path}')\" && echo '{encoded}' | base64 -d > '{path}'",
-                node=node,
+                host=host,
                 timeout=30.0,
             )
 
             if result["success"]:
-                return f"Successfully wrote {len(content)} bytes to {path} on node '{node}'"
+                return f"Successfully wrote {len(content)} bytes to {path} on host '{host}'"
             else:
                 return f"Error: {result['error'] or 'Failed to write file'}"
 
         except KeyError:
-            return f"Error: Node '{node}' not found"
+            return f"Error: Host '{host}' not found"
         except Exception as e:
-            return f"Error writing file to remote node: {str(e)}"
+            return f"Error writing file to remote host: {str(e)}"
 
 
 class EditFileTool(Tool):
@@ -373,7 +373,7 @@ class CompareTool(Tool):
     """Compare local and remote files using diff."""
 
     name = "compare"
-    description = "Compare a local file with a remote file on a node. " \
+    description = "Compare a local file with a remote file on a host. " \
                   "Use this when you want to see differences between files. " \
                   "Returns unified diff format."
     parameters = {
@@ -387,12 +387,12 @@ class CompareTool(Tool):
                 "type": "string",
                 "description": "Path to remote file",
             },
-            "node": {
+            "host": {
                 "type": "string",
-                "description": "Node name (e.g., 'myserver')",
+                "description": "Host name (e.g., 'myserver')",
             },
         },
-        "required": ["local_path", "remote_path", "node"]
+        "required": ["local_path", "remote_path", "host"]
     }
 
     def __init__(
@@ -414,7 +414,7 @@ class CompareTool(Tool):
         self,
         local_path: str,
         remote_path: str,
-        node: str,
+        host: str,
         **kwargs: Any
     ) -> str:
         # Read local file
@@ -428,14 +428,14 @@ class CompareTool(Tool):
         except Exception as e:
             return f"Error reading local file: {str(e)}"
 
-        # Read remote file via node
+        # Read remote file via host
         if not self._node_manager:
             return "Error: Node manager not available"
 
         try:
             result = await self._node_manager.execute(
                 f"cat '{remote_path}'",
-                node=node,
+                host=host,
                 timeout=30.0,
             )
             if not result.get("success"):
@@ -452,11 +452,11 @@ class CompareTool(Tool):
             local_lines,
             remote_lines,
             fromfile=f"local:{local_path}",
-            tofile=f"remote:{node}:{remote_path}",
+            tofile=f"remote:{host}:{remote_path}",
             lineterm=""
         ))
 
         if not diff:
-            return f"Files are identical: {local_path} == {node}:{remote_path}"
+            return f"Files are identical: {local_path} == {host}:{remote_path}"
 
         return "Files differ:\n" + "\n".join(diff)

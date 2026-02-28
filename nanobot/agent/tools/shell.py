@@ -49,7 +49,7 @@ class ExecTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Execute a shell command and return its output. For remote nodes (e.g., 'on myserver run ls'), use the 'node' parameter instead of manually constructing SSH commands. The node will be auto-connected if needed."
+        return "Execute a shell command and return its output. For remote hosts (e.g., 'on myserver run ls'), use the 'host' parameter instead of manually constructing SSH commands. The host will be auto-connected if needed."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -68,19 +68,19 @@ class ExecTool(Tool):
             "required": ["command"]
         }
 
-        # Add node parameter if node_manager is available
+        # Add host parameter if node_manager is available
         if self._node_manager is not None:
-            props["properties"]["node"] = {
+            props["properties"]["host"] = {
                 "type": "string",
-                "description": "Remote node name to execute command on. When user says 'on <node_name>' or similar, use this parameter. The node must be configured with 'nodes action=\"add\"'. Example: if user says 'on myserver run ls', use node='myserver' and command='ls'. Do not manually construct SSH commands."
+                "description": "Remote host name to execute command on. When user says 'on <host_name>' or similar, use this parameter. The host must be configured with 'nodes action=\"add\"'. Example: if user says 'on myserver run ls', use host='myserver' and command='ls'. Do not manually construct SSH commands."
             }
 
         return props
     
-    async def execute(self, command: str, working_dir: str | None = None, node: str | None = None, **kwargs: Any) -> str:
-        # Handle remote node execution
-        if node and self._node_manager:
-            return await self._execute_remote(command, node, working_dir)
+    async def execute(self, command: str, working_dir: str | None = None, host: str | None = None, **kwargs: Any) -> str:
+        # Handle remote host execution
+        if host and self._node_manager:
+            return await self._execute_remote(command, host, working_dir)
 
         # Local execution
         return await self._execute_local(command, working_dir)
@@ -184,15 +184,15 @@ class ExecTool(Tool):
     async def _execute_remote(
         self,
         command: str,
-        node: str,
+        host: str,
         working_dir: str | None = None,
     ) -> str:
         """
-        Execute command on a remote node.
+        Execute command on a remote host.
 
         Args:
             command: Command to execute.
-            node: Node name.
+            host: Host name.
             working_dir: Optional working directory.
 
         Returns:
@@ -210,7 +210,7 @@ class ExecTool(Tool):
 
             result = await self._node_manager.execute(
                 full_command,
-                node=node,
+                host=host,
                 timeout=self.timeout,
             )
 
@@ -220,13 +220,13 @@ class ExecTool(Tool):
                     output += f"\nSTDERR:\n{result['error']}"
                 # Add execution info for debugging
                 cwd_info = f"📁 CWD: {working_dir}" if working_dir else "📁 CWD: (default)"
-                output = f"🔧 Tool: exec\n🌐 Node: {node}\n{cwd_info}\n⚡ Cmd: {command}\n\n{output}"
+                output = f"🔧 Tool: exec\n🌐 Host: {host}\n{cwd_info}\n⚡ Cmd: {command}\n\n{output}"
                 return output
             else:
                 error = result['error'] or 'Command failed'
-                return f"🔧 Tool: exec\n🌐 Node: {node}\n⚡ Cmd: {command}\n\n❌ Error: {error}"
+                return f"🔧 Tool: exec\n🌐 Host: {host}\n⚡ Cmd: {command}\n\n❌ Error: {error}"
 
         except KeyError:
-            return f"Error: Node '{node}' not found. Use 'nodes action=\"add\"' to add it first"
+            return f"Error: Host '{host}' not found. Use 'nodes action=\"add\"' to add it first"
         except Exception as e:
-            return f"🔧 Tool: exec\n🌐 Node: {node}\n⚡ Cmd: {command}\n\n❌ Error: {str(e)}"
+            return f"🔧 Tool: exec\n🌐 Host: {host}\n⚡ Cmd: {command}\n\n❌ Error: {str(e)}"

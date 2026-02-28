@@ -278,7 +278,7 @@ Examples:
             return "Error: 'command' parameter is required for exec action"
 
         try:
-            result = await self.manager.execute(command, node=name, timeout=timeout)
+            result = await self.manager.execute(command, host=name, timeout=timeout)
 
             if result["success"]:
                 output = result["output"] or "(no output)"
