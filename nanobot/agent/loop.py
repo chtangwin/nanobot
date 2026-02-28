@@ -16,7 +16,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.filesystem import CompareFileTool, EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.filesystem import CompareDirTool, CompareFileTool, EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.hosts import HostsTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -156,6 +156,7 @@ class AgentLoop:
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         self.tools.register(HostsTool(host_manager=self.host_manager))
+        self.tools.register(CompareDirTool(self.backend_router))
         self.tools.register(CompareFileTool(self.backend_router))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))

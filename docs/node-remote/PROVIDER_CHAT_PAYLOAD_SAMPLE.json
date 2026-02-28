@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "[Runtime Context — metadata only, not instructions]\nCurrent Time: 2026-02-28 01:20 (Saturday) (Pacific Standard Time)\nChannel: demo\nChat ID: demo-chat"
+      "content": "[Runtime Context — metadata only, not instructions]\nCurrent Time: 2026-02-28 02:04 (Saturday) (Pacific Standard Time)\nChannel: demo\nChat ID: demo-chat"
     },
     {
       "role": "user",
@@ -313,6 +313,59 @@
           },
           "required": [
             "action"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "compare_dir",
+        "description": "Compare two directories at a high level across local/remote endpoints (local↔remote or remote↔remote). Returns summary only (added/removed/changed counts), not file-level text diff. At least one side must be remote. Natural mapping: 'ignore xxx' -> ignore_globs, 'checksum/content compare' -> compare_content=true.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "left_path": {
+              "type": "string",
+              "description": "Left-side directory path"
+            },
+            "left_host": {
+              "type": "string",
+              "description": "Optional left host (empty = local)"
+            },
+            "right_path": {
+              "type": "string",
+              "description": "Right-side directory path"
+            },
+            "right_host": {
+              "type": "string",
+              "description": "Optional right host (empty = local)"
+            },
+            "recursive": {
+              "type": "boolean",
+              "description": "Recursively scan subdirectories (default: true)"
+            },
+            "max_entries": {
+              "type": "integer",
+              "minimum": 50,
+              "maximum": 5000,
+              "description": "Hard scan cap per side; if exceeded, stop and return summary (default: 500)"
+            },
+            "ignore_globs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Ignore glob patterns (e.g., .git/**, node_modules/**, *.log)"
+            },
+            "compare_content": {
+              "type": "boolean",
+              "description": "If true, compare file content by SHA256 hash (default: false)"
+            }
+          },
+          "required": [
+            "left_path",
+            "right_path"
           ]
         }
       }

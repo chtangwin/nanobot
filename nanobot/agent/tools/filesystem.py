@@ -175,6 +175,387 @@ class ListDirTool(Tool):
             return f"Error listing directory: {e}"
 
 
+class CompareDirTool(Tool):
+    name = "compare_dir"
+    description = (
+        "Compare two directories at a high level across local/remote endpoints "
+        "(local↔remote or remote↔remote). Returns summary only (added/removed/changed counts), "
+        "not file-level text diff. At least one side must be remote. "
+        "Natural mapping: 'ignore xxx' -> ignore_globs, 'checksum/content compare' -> compare_content=true."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "left_path": {"type": "string", "description": "Left-side directory path"},
+            "left_host": {"type": "string", "description": "Optional left host (empty = local)"},
+            "right_path": {"type": "string", "description": "Right-side directory path"},
+            "right_host": {"type": "string", "description": "Optional right host (empty = local)"},
+            "recursive": {
+                "type": "boolean",
+                "description": "Recursively scan subdirectories (default: true)",
+            },
+            "max_entries": {
+                "type": "integer",
+                "minimum": 50,
+                "maximum": 5000,
+                "description": "Hard scan cap per side; if exceeded, stop and return summary (default: 500)",
+            },
+            "ignore_globs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Ignore glob patterns (e.g., .git/**, node_modules/**, *.log)",
+            },
+            "compare_content": {
+                "type": "boolean",
+                "description": "If true, compare file content by SHA256 hash (default: false)",
+            },
+        },
+        "required": ["left_path", "right_path"],
+    }
+
+    _DEFAULT_IGNORES = [
+        ".git/**",
+        "node_modules/**",
+        ".venv/**",
+        "__pycache__/**",
+        "*.pyc",
+        "*.log",
+        ".DS_Store",
+    ]
+
+    def __init__(self, backend_router: ExecutionBackendRouter):
+        self.backend_router = backend_router
+
+    async def execute(
+        self,
+        left_path: str,
+        right_path: str,
+        left_host: str | None = None,
+        right_host: str | None = None,
+        recursive: bool = True,
+        max_entries: int = 500,
+        ignore_globs: list[str] | None = None,
+        compare_content: bool = False,
+        **kwargs: Any,
+    ) -> str:
+        if not left_host and not right_host:
+            return (
+                "Error: local<->local compare is not supported in compare_dir. "
+                "Use local tooling via exec (e.g., diff -rq / git diff --no-index)."
+            )
+
+        try:
+            left_backend = await self.backend_router.resolve(left_host)
+            right_backend = await self.backend_router.resolve(right_host)
+        except KeyError as e:
+            return f"Error: Host not found: {e}"
+        except Exception as e:
+            return f"Error preparing compare backends: {e}"
+
+        ignore_patterns, ignore_sources = await self._resolve_ignore_patterns(
+            left_backend,
+            left_path,
+            right_backend,
+            right_path,
+            ignore_globs,
+        )
+
+        left_scan = await self._scan_tree(
+            backend=left_backend,
+            host=left_host,
+            root_path=left_path,
+            recursive=recursive,
+            max_entries=max_entries,
+            ignore_patterns=ignore_patterns,
+            compare_content=compare_content,
+        )
+        if left_scan.get("error"):
+            return left_scan["error"]
+
+        right_scan = await self._scan_tree(
+            backend=right_backend,
+            host=right_host,
+            root_path=right_path,
+            recursive=recursive,
+            max_entries=max_entries,
+            ignore_patterns=ignore_patterns,
+            compare_content=compare_content,
+        )
+        if right_scan.get("error"):
+            return right_scan["error"]
+
+        if left_scan.get("too_many") or right_scan.get("too_many"):
+            return self._render_limit_exceeded(
+                left_host,
+                left_path,
+                right_host,
+                right_path,
+                left_scan,
+                right_scan,
+                max_entries,
+                ignore_sources,
+            )
+
+        return self._render_summary(
+            left_host,
+            left_path,
+            right_host,
+            right_path,
+            left_scan,
+            right_scan,
+            compare_content,
+            recursive,
+            ignore_sources,
+        )
+
+    async def _resolve_ignore_patterns(
+        self,
+        left_backend: Any,
+        left_path: str,
+        right_backend: Any,
+        right_path: str,
+        user_globs: list[str] | None,
+    ) -> tuple[list[str], list[str]]:
+        patterns: list[str] = []
+        sources: list[str] = []
+
+        if user_globs:
+            patterns.extend(user_globs)
+            sources.append("user")
+        else:
+            gitignore_patterns = []
+            gitignore_patterns.extend(await self._load_gitignore(left_backend, left_path))
+            gitignore_patterns.extend(await self._load_gitignore(right_backend, right_path))
+            if gitignore_patterns:
+                patterns.extend(gitignore_patterns)
+                sources.append(".gitignore")
+
+        patterns.extend(self._DEFAULT_IGNORES)
+        sources.append("defaults")
+
+        # de-dup while preserving order
+        dedup = []
+        seen = set()
+        for p in patterns:
+            if p and p not in seen:
+                dedup.append(p)
+                seen.add(p)
+        return dedup, sources
+
+    async def _load_gitignore(self, backend: Any, dir_path: str) -> list[str]:
+        gitignore_path = f"{dir_path.rstrip('/')}/.gitignore"
+        res = await backend.read_file(gitignore_path)
+        if not res.get("success"):
+            return []
+
+        patterns: list[str] = []
+        for raw in (res.get("content") or "").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            # Negation is intentionally unsupported in this MVP.
+            if line.startswith("!"):
+                continue
+            patterns.append(line)
+        return patterns
+
+    async def _scan_tree(
+        self,
+        *,
+        backend: Any,
+        host: str | None,
+        root_path: str,
+        recursive: bool,
+        max_entries: int,
+        ignore_patterns: list[str],
+        compare_content: bool,
+    ) -> dict[str, Any]:
+        entries: dict[str, dict[str, Any]] = {}
+        ignored_count = 0
+        stack: list[tuple[str, str]] = [("", root_path)]
+
+        while stack:
+            rel_dir, abs_dir = stack.pop()
+            listed = await backend.list_dir(abs_dir)
+            if not listed.get("success"):
+                side = f"{host}:{root_path}" if host else f"local:{root_path}"
+                return {"error": f"Error listing directory {side}: {listed.get('error')}"}
+
+            for item in listed.get("entries") or []:
+                name = item.get("name") or ""
+                is_dir = bool(item.get("is_dir"))
+                rel = f"{rel_dir}/{name}" if rel_dir else name
+                if self._should_ignore(rel, is_dir, ignore_patterns):
+                    ignored_count += 1
+                    continue
+
+                if len(entries) >= max_entries:
+                    return {
+                        "entries": entries,
+                        "count": len(entries),
+                        "ignored_count": ignored_count,
+                        "too_many": True,
+                    }
+
+                abs_child = f"{abs_dir.rstrip('/')}/{name}"
+                meta: dict[str, Any] = {"is_dir": is_dir}
+                if compare_content and not is_dir:
+                    rb = await backend.read_bytes(abs_child)
+                    if not rb.get("success"):
+                        side = f"{host}:{abs_child}" if host else f"local:{abs_child}"
+                        return {"error": f"Error reading bytes {side}: {rb.get('error')}"}
+                    data = rb.get("content") or b""
+                    meta["size"] = len(data)
+                    meta["sha256"] = hashlib.sha256(data).hexdigest()
+
+                entries[rel] = meta
+
+                if recursive and is_dir:
+                    stack.append((rel, abs_child))
+
+        return {
+            "entries": entries,
+            "count": len(entries),
+            "ignored_count": ignored_count,
+            "too_many": False,
+        }
+
+    @staticmethod
+    def _should_ignore(rel_path: str, is_dir: bool, patterns: list[str]) -> bool:
+        import fnmatch
+
+        norm = rel_path.strip("/")
+        base = norm.split("/")[-1] if norm else norm
+
+        for p in patterns:
+            pat = (p or "").strip()
+            if not pat:
+                continue
+
+            if pat.startswith("/"):
+                pat = pat[1:]
+
+            if pat.endswith("/"):
+                d = pat.rstrip("/")
+                if norm == d or norm.startswith(d + "/") or base == d:
+                    return True
+                continue
+
+            if fnmatch.fnmatch(norm, pat) or fnmatch.fnmatch(base, pat):
+                return True
+
+            # Treat plain segment patterns as directory/file name match anywhere.
+            if "*" not in pat and "?" not in pat and "[" not in pat:
+                if base == pat:
+                    return True
+                if is_dir and (norm == pat or norm.endswith("/" + pat)):
+                    return True
+
+        return False
+
+    def _render_limit_exceeded(
+        self,
+        left_host: str | None,
+        left_path: str,
+        right_host: str | None,
+        right_path: str,
+        left_scan: dict[str, Any],
+        right_scan: dict[str, Any],
+        max_entries: int,
+        ignore_sources: list[str],
+    ) -> str:
+        left_label = f"{left_host}:{left_path}" if left_host else f"local:{left_path}"
+        right_label = f"{right_host}:{right_path}" if right_host else f"local:{right_path}"
+        return (
+            "Directory comparison aborted: entry limit exceeded before full analysis.\n"
+            f"- left: {left_label} scanned={left_scan.get('count', 0)} (limit={max_entries})\n"
+            f"- right: {right_label} scanned={right_scan.get('count', 0)} (limit={max_entries})\n"
+            "Tip: narrow paths or increase max_entries.\n"
+            f"Ignore rules applied from: {', '.join(ignore_sources)}"
+        )
+
+    def _render_summary(
+        self,
+        left_host: str | None,
+        left_path: str,
+        right_host: str | None,
+        right_path: str,
+        left_scan: dict[str, Any],
+        right_scan: dict[str, Any],
+        compare_content: bool,
+        recursive: bool,
+        ignore_sources: list[str],
+    ) -> str:
+        left_entries: dict[str, dict[str, Any]] = left_scan["entries"]
+        right_entries: dict[str, dict[str, Any]] = right_scan["entries"]
+
+        left_keys = set(left_entries.keys())
+        right_keys = set(right_entries.keys())
+
+        only_left = sorted(left_keys - right_keys)
+        only_right = sorted(right_keys - left_keys)
+        common = sorted(left_keys & right_keys)
+
+        type_mismatch = []
+        changed_content = []
+        for key in common:
+            l = left_entries[key]
+            r = right_entries[key]
+            if bool(l.get("is_dir")) != bool(r.get("is_dir")):
+                type_mismatch.append(key)
+                continue
+            if compare_content and not l.get("is_dir"):
+                if l.get("sha256") != r.get("sha256"):
+                    changed_content.append(key)
+
+        left_label = f"{left_host}:{left_path}" if left_host else f"local:{left_path}"
+        right_label = f"{right_host}:{right_path}" if right_host else f"local:{right_path}"
+
+        def _sample(items: list[str], cap: int = 20) -> str:
+            if not items:
+                return "(none)"
+            if len(items) <= cap:
+                return "\n".join(f"  - {x}" for x in items)
+            shown = "\n".join(f"  - {x}" for x in items[:cap])
+            return f"{shown}\n  ... ({len(items) - cap} more)"
+
+        lines = [
+            "Directory comparison summary",
+            f"- left: {left_label}",
+            f"- right: {right_label}",
+            f"- recursive: {recursive}",
+            f"- mode: {'content-hash' if compare_content else 'structure-only'}",
+            "",
+            "Counts:",
+            f"- left entries: {left_scan.get('count', 0)}",
+            f"- right entries: {right_scan.get('count', 0)}",
+            f"- only in left: {len(only_left)}",
+            f"- only in right: {len(only_right)}",
+            f"- type mismatch: {len(type_mismatch)}",
+            f"- changed content: {len(changed_content) if compare_content else 'n/a (compare_content=false)'}",
+            "",
+            "Sample - only in left:",
+            _sample(only_left),
+            "",
+            "Sample - only in right:",
+            _sample(only_right),
+            "",
+            "Sample - type mismatch:",
+            _sample(type_mismatch),
+        ]
+
+        if compare_content:
+            lines += ["", "Sample - changed content:", _sample(changed_content)]
+
+        lines += [
+            "",
+            f"Ignored entries: left={left_scan.get('ignored_count', 0)}, right={right_scan.get('ignored_count', 0)}",
+            f"Ignore rules applied from: {', '.join(ignore_sources)}",
+            "Note: Run compare_file on selected paths for detailed file-level diff/checksum.",
+        ]
+        return "\n".join(lines)
+
+
 class CompareFileTool(Tool):
     name = "compare_file"
     description = (
