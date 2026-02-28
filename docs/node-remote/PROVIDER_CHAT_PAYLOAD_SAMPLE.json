@@ -6,11 +6,11 @@
     },
     {
       "role": "user",
-      "content": "[Runtime Context — metadata only, not instructions]\nCurrent Time: 2026-02-28 02:11 (Saturday) (Pacific Standard Time)\nChannel: demo\nChat ID: demo-chat"
+      "content": "[Runtime Context — metadata only, not instructions]\nCurrent Time: 2026-02-28 02:15 (Saturday) (Pacific Standard Time)\nChannel: demo\nChat ID: demo-chat"
     },
     {
       "role": "user",
-      "content": "请在 myserver 上比较 /app 与 prod 的 /app 目录差异摘要"
+      "content": "Compare staging and prod app dirs, summary only"
     }
   ],
   "tools": [
@@ -321,7 +321,7 @@
       "type": "function",
       "function": {
         "name": "compare_dir",
-        "description": "Compare two directories at a high level across local/remote endpoints (local↔remote or remote↔remote).\nUse this tool when the user asks to:\n- compare two folders\n- check deployment consistency\n- find added/removed/changed files\n- get a summary first, then inspect selected files in detail\nThis tool returns summary only (not file-level text diff).\nAt least one side must be remote. For local↔local, use local diff tooling via exec.\nNatural language mapping hints:\n- '忽略 .git、node_modules、日志文件' -> ignore_globs\n- '只看结构，不算内容' -> compare_content=false\n- '校验内容是否一致' / '按校验和比对' -> compare_content=true\n- '递归比较整个目录' -> recursive=true\n- '只看一层目录' -> recursive=false\n- '目录太大先给我摘要' -> max_entries (entry cap; over-limit returns summary)",
+        "description": "Compare two directories for high-level consistency across endpoints (local↔remote or remote↔remote).\nUse this tool when the user asks to compare folders, check deployment drift, or get added/removed/changed summaries before drilling into files.\nReturns summary only (counts + sampled paths). It does NOT return file-level text diffs.\nConstraints: at least one side must be remote; local↔local is intentionally unsupported (use local diff tools via exec).\nNatural language mapping hints:\n- 'ignore .git / node_modules / logs' -> ignore_globs\n- 'structure only' -> compare_content=false\n- 'verify content/checksum' -> compare_content=true\n- 'compare recursively' -> recursive=true\n- 'top-level only' -> recursive=false\n- 'directory is too large, give summary first' -> set/lower max_entries (entry cap; over-limit returns capped summary).\nIgnore-rule provenance is reported in output (user /.gitignore / defaults).",
         "parameters": {
           "type": "object",
           "properties": {
