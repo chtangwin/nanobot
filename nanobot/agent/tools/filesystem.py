@@ -908,6 +908,21 @@ class CompareFileTool(Tool):
             cmp_right = [line.lower() for line in cmp_right]
 
         if cmp_left == cmp_right:
+            if left_bytes != right_bytes:
+                # Content matches after splitlines() but raw bytes differ
+                # (e.g. CRLF vs LF, trailing newline difference)
+                details = []
+                left_has_crlf = b"\r\n" in left_bytes
+                right_has_crlf = b"\r\n" in right_bytes
+                if left_has_crlf != right_has_crlf:
+                    details.append(
+                        f"line endings differ: {left_label} uses {'CRLF' if left_has_crlf else 'LF'}, "
+                        f"{right_label} uses {'CRLF' if right_has_crlf else 'LF'}"
+                    )
+                if len(left_bytes) != len(right_bytes):
+                    details.append(f"size: {len(left_bytes)} vs {len(right_bytes)} bytes")
+                note = "; ".join(details) if details else "raw bytes differ"
+                return f"Text content is logically identical but {note}: {left_label} vs {right_label}"
             return f"Text files are identical: {left_label} == {right_label}"
 
         diff = list(difflib.unified_diff(
