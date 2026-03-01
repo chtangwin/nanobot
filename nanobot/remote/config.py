@@ -19,9 +19,10 @@ class HostConfig:
     local_port: Optional[int] = None  # Local port for SSH tunnel
     auth_token: Optional[str] = None
     workspace: Optional[str] = None
+    active_session: Optional[Dict] = None  # persisted session for resume
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "ssh_host": self.ssh_host,
             "ssh_port": self.ssh_port,
             "ssh_key_path": self.ssh_key_path,
@@ -30,6 +31,9 @@ class HostConfig:
             "auth_token": self.auth_token,
             "workspace": self.workspace,
         }
+        if self.active_session:
+            d["active_session"] = self.active_session
+        return d
 
     @classmethod
     def from_dict(cls, name: str, data: dict) -> "HostConfig":
