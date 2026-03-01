@@ -32,40 +32,57 @@ class HostManager:
         return True
 
     async def connect(self, name: str) -> RemoteHost:
+        """Establish or verify connection (user-initiated).
+
+        Used when user explicitly asks to connect.
+        - In-memory: ping to verify, if unhealthy → disconnect → resume → deploy
+        - Not in memory: resume → deploy
+        """
         config = self.config.get_host(name)
         if not config:
             raise KeyError(f"Host not found: {name}")
 
-        if name in self._connections:
+        host = self._connections.get(name)
+        if host:
+            # Verify existing connection
+            if await host.ping():
+                return host
+            # Unhealthy — clean up and reconnect
+            logger.warning(f"Host '{name}' ping failed, reconnecting...")
             await self.disconnect(name)
 
+        return await self._resume_or_deploy(name, config)
+
+    async def get_or_connect(self, name: str) -> RemoteHost:
+        """Get existing host or establish connection (implicit).
+
+        Used by exec/router. Returns existing in-memory host and trusts
+        _rpc() auto-heal for transport recovery. No ping overhead.
+        """
+        config = self.config.get_host(name)
+        if not config:
+            raise KeyError(f"Host not found: {name}")
+
+        host = self._connections.get(name)
+        if host:
+            return host
+
+        return await self._resume_or_deploy(name, config)
+
+    async def _resume_or_deploy(self, name: str, config: HostConfig) -> RemoteHost:
+        """Try resume persisted session, fall back to full deploy."""
+        resumed = await self._try_resume(name)
+        if resumed:
+            return resumed
+
+        # Full deploy
         async with self._lock:
             host = RemoteHost(config)
             await host.setup()
             self._connections[name] = host
 
-        # Persist session info for resume after restart
         self._save_session(name, host)
         return host
-
-    async def get_or_connect(self, name: str) -> RemoteHost:
-        """Get existing host object or create initial connection.
-
-        If a host object already exists (even temporarily disconnected), return it
-        so lower layers can attempt transport-only auto-recovery without forcing a
-        new session/deploy.  If no in-memory connection exists but there is a
-        persisted active_session, try to resume it before doing a full connect.
-        """
-        host = self._connections.get(name)
-        if host:
-            return host
-
-        # Try to resume a persisted session (e.g. after nanobot restart)
-        resumed = await self._try_resume(name)
-        if resumed:
-            return resumed
-
-        return await self.connect(name)
 
     async def disconnect(self, name: str) -> bool:
         if name not in self._connections:
@@ -149,12 +166,10 @@ class HostManager:
                     logger.info(f"Resumed session '{session_id}' on '{name}'")
                     return host
                 else:
-                    logger.warning(f"Resume failed for '{name}', will do full connect")
-                    self._clear_session(name)
+                    logger.warning(f"Resume failed for '{name}', keeping session for retry")
                     return None
         except Exception as e:
             logger.warning(f"Resume failed for '{name}': {e}")
-            self._clear_session(name)
             return None
 
     async def __aenter__(self):

@@ -239,10 +239,31 @@ C:\Users\YourName\.ssh\id_rsa
 | `list` | 列出所有主机 | - |
 | `add` | 添加新主机 | `name`, `ssh_host` |
 | `remove` | 移除主机 | `name` |
-| `connect` | 连接到主机 | `name` |
-| `disconnect` | 断开主机 | `name` |
+| `connect` | 连接到主机（验证连接，失败则重建）。仅在用户明确要求或连接失败后使用 | `name` |
+| `disconnect` | ⚠️ 断开主机（TEARDOWN：杀进程、删 session 目录） | `name` |
 | `status` | 查看主机状态 | `name` |
-| `exec` | 执行命令（已废弃，用 exec 工具） | - |
+| `exec` | 执行命令（自动连接，自动恢复传输层） | `name`, `command` |
+
+### 支持远程的工具
+
+### 连接管理策略
+
+```
+connect() ← 用户主动 "connect"
+  内存有 → ping 验证
+    → 成功 → "✓ Already connected"
+    → 失败 → disconnect → resume → 全新部署
+  内存没有 → resume → 全新部署
+
+get_or_connect() ← exec/router 隐式调用
+  内存有 → 直接返回（信任 _rpc auto-heal）
+  内存没有 → resume → 全新部署
+```
+
+- **exec 不需要先 connect**：直接调用 exec，内部自动连接
+- **auto-heal**：`_rpc()` 层自动重建传输层（SSH + WebSocket + auth），不重新部署
+- **session 持久化**：连接信息保存在 `~/.nanobot/hosts.json` 的 `active_session`，nanobot 重启后可恢复
+- **resume 失败不清 session**：网络可能暂时不通，保留 session 供后续恢复
 
 ### 支持远程的工具
 

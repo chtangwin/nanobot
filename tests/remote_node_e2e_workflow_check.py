@@ -29,7 +29,7 @@ def section(n, title):
 
 async def test():
     config = HostsConfig.load(HostsConfig.get_default_config_path())
-    host_config = config.hosts["myserver"]
+    host_config = config.hosts["debian-bot"]
 
     print("=" * 60)
     print("  Full Workflow Test: deploy → commands → teardown")

@@ -45,6 +45,7 @@ class RemoteHost:
         self.websocket: Optional[Any] = None
         self._running = False
         self._authenticated = False
+        self._last_recovery_error = ""
 
     @property
     def is_connected(self) -> bool:
@@ -188,16 +189,27 @@ class RemoteHost:
 
         IMPORTANT: no redeploy, no new session_id.
         """
+        self._last_recovery_error = ""
         try:
             await self._mark_transport_down()
-            await self._create_ssh_tunnel()
-            await self._connect_websocket()
+            try:
+                await self._create_ssh_tunnel()
+            except Exception as e:
+                self._last_recovery_error = f"Network unreachable: SSH tunnel failed ({e})"
+                raise
+            try:
+                await self._connect_websocket()
+            except Exception as e:
+                self._last_recovery_error = f"Remote server not responding: WebSocket failed ({e})"
+                raise
             await self._authenticate()
             self._running = True
             logger.info(f"Transport recovered for host {self.config.name} (session: {self.session_id})")
             return True
         except Exception as e:
-            logger.warning(f"Transport recovery failed for {self.config.name}: {e}")
+            if not self._last_recovery_error:
+                self._last_recovery_error = f"Transport recovery failed: {e}"
+            logger.warning(f"{self._last_recovery_error} (host: {self.config.name})")
             await self._mark_transport_down()
             return False
 
@@ -215,10 +227,8 @@ class RemoteHost:
             return {"success": False, "error": f"Cannot connect to remote host: {e}"}
 
         if not ready:
-            return {
-                "success": False,
-                "error": "Cannot connect to remote host or remote service is down",
-            }
+            error = self._last_recovery_error or "Cannot connect to remote host"
+            return {"success": False, "error": error}
 
         for attempt in range(2):
             try:
@@ -245,15 +255,21 @@ class RemoteHost:
                     recovered = await self._recover_transport()
                     if recovered:
                         continue
-                    return {
-                        "success": False,
-                        "error": "Connection lost and auto-reconnect failed (remote host/service unavailable)",
-                    }
+                    error = self._last_recovery_error or "Connection lost and auto-reconnect failed"
+                    return {"success": False, "error": error}
 
                 logger.error(f"RPC failed on {self.config.name}: {e}")
                 return {"success": False, "error": str(e)}
 
         return {"success": False, "error": "RPC retry exhausted"}
+
+    async def ping(self, timeout: float = 5.0) -> bool:
+        """Lightweight health check against remote_server."""
+        try:
+            result = await self._rpc({"type": "ping"}, timeout=timeout)
+            return result.get("type") == "pong" or result.get("success", False)
+        except Exception:
+            return False
 
     async def exec(self, command: str, timeout: float = 30.0) -> dict:
         """Execute a shell command on the remote host."""

@@ -201,45 +201,91 @@ sequenceDiagram
 
 ## 5) 一句话心智模型
 
-- `hosts` 负责“**我要连哪台机器**”。
-- `backend_router` 负责“**这次操作走本地还是远程**”。
-- 具体工具负责“**我要做什么操作**”（exec/read/write/edit/list/compare）。
+- `hosts` 负责"**我要连哪台机器**"。
+- `backend_router` 负责"**这次操作走本地还是远程**"。
+- 具体工具负责"**我要做什么操作**"（exec/read/write/edit/list/compare）。
 
 ---
 
-## 6) 动态流程 C：`hosts action="connect"` 与连接复用
+## 6) 动态流程 C：连接管理 — `connect()` vs `get_or_connect()`
+
+### connect()：用户主动连接（ping 验证）
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant LLM as LLM
-    participant TR as ToolRegistry
     participant HT as HostsTool
     participant HM as HostManager
     participant RH as RemoteHost
     participant RS as remote_server.py
 
     U->>LLM: hosts action="connect" name="myserver"
-    LLM->>TR: execute("hosts", {action:"connect", name:"myserver"})
-    TR->>HT: HostsTool.execute(...)
+    LLM->>HT: execute({action:"connect", name:"myserver"})
     HT->>HM: connect("myserver")
-    HM->>RH: new RemoteHost(config)
-    RH->>RH: setup() (SSH tunnel + deploy + WS auth)
-    RH->>RS: start/handshake
-    RS-->>RH: authenticated
-    RH-->>HM: connected
-    HM-->>HT: RemoteHost(session_id)
-    HT-->>TR: "Connected... (session: xxx)"
 
-    Note over HM,RH: 连接存入 HM._connections["myserver"]
-
-    U->>LLM: exec command="pwd" host="myserver"
-    LLM->>TR: execute("exec", {command:"pwd", host:"myserver"})
-    TR->>HM: (via router) get_or_connect("myserver")
-    HM-->>TR: return existing connected RemoteHost (no redeploy)
+    alt 内存有 host
+        HM->>RH: ping()
+        alt ping 成功
+            RH-->>HM: pong ✓
+            HM-->>HT: "✓ Already connected"
+        else ping 失败
+            RH-->>HM: timeout ✗
+            HM->>RH: disconnect() + teardown
+            HM->>RH: resume or full deploy
+            RH->>RS: setup/reconnect
+            RS-->>RH: authenticated
+            HM-->>HT: "✓ Connected (new session)"
+        end
+    else 内存没有
+        HM->>RH: _try_resume() or setup()
+        RH->>RS: connect
+        RS-->>RH: authenticated
+        HM-->>HT: "✓ Connected"
+    end
 ```
 
-> 上图表达的是：`hosts action="connect"` 是“显式预连接”；后续业务工具会复用同一个连接，避免重复 setup。
+### get_or_connect()：隐式连接（exec/router，无 ping）
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant LLM as LLM
+    participant RT as Router
+    participant HM as HostManager
+    participant RH as RemoteHost
+    participant RS as remote_server.py
+
+    U->>LLM: exec command="pwd" host="myserver"
+    LLM->>RT: execute("exec", {command:"pwd", host:"myserver"})
+    RT->>HM: get_or_connect("myserver")
+
+    alt 内存有 host
+        HM-->>RT: 直接返回（不 ping，信任 auto-heal）
+    else 内存没有
+        HM->>RH: _try_resume() or setup()
+        RH-->>HM: connected
+        HM-->>RT: RemoteHost
+    end
+
+    RT->>RH: _rpc({type:"exec", command:"pwd"})
+    alt transport 正常
+        RH->>RS: WebSocket 消息
+        RS-->>RH: 结果
+    else transport 断
+        RH->>RH: auto-heal (_recover_transport)
+        alt SSH 失败
+            RH-->>RT: "Network unreachable: SSH tunnel failed"
+        else WS 失败
+            RH-->>RT: "Remote server not responding: WebSocket failed"
+        else 恢复成功
+            RH->>RS: 重试 WebSocket 消息
+            RS-->>RH: 结果
+        end
+    end
+```
+
+> **关键区别**：`connect()` 主动 ping 验证 → 确保返回可用连接。`get_or_connect()` 不 ping → 信任 `_rpc()` auto-heal 处理传输问题。exec 不需要先 connect。
 
 ---
 
@@ -422,9 +468,9 @@ sequenceDiagram
 
 ---
 
-## 11) 从架构图跳转到“真实 LLM payload”样例
+## 11) 从架构图跳转到"真实 LLM payload"样例
 
-为方便 PR reviewer 将“架构设计”与“LLM 实际看到的输入”对应起来，本分支提供了真实运行时捕获（脱敏）样例：
+为方便 PR reviewer 将"架构设计"与"LLM 实际看到的输入"对应起来，本分支提供了真实运行时捕获（脱敏）样例：
 
 - `docs/node-remote/PROVIDER_CHAT_PAYLOAD_SAMPLE.json`
 

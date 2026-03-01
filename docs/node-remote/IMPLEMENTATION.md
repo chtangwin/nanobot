@@ -149,15 +149,18 @@ teardown()
 **核心方法**：
 - `add_host()`：添加并保存主机配置
 - `remove_host()`：移除并断开主机
-- `connect()`：连接到主机
-- `disconnect()`：断开主机
-- `execute()`：在主机上执行命令
-- `execute_on_all()`：在所有连接的主机上执行
+- `connect(name)`：用户主动连接 — ping 验证，失败则 disconnect → resume → 全新部署
+- `get_or_connect(name)`：隐式连接（exec/router 调用）— 直接返回内存中的 host，信任 `_rpc()` auto-heal
+- `disconnect()`：断开主机（teardown）
+- `_resume_or_deploy()`：恢复持久化 session 或全新部署
+- `_try_resume()`：从 hosts.json 的 `active_session` 恢复（nanobot 重启后）
+- `_save_session()` / `_clear_session()`：持久化/清除 session 信息
 
 **连接池**：
-- 维护 `name -> RemoteHost` 字典
-- 执行时自动连接（如果未连接）
-- 懒连接（仅在需要时连接）
+- 维护 `_connections: dict[name, RemoteHost]`
+- `get_or_connect()`：懒连接，仅在需要时建立
+- `connect()`：主动验证（ping），确保返回可用连接
+- nanobot 重启后通过 `active_session` 恢复，不主动 bootstrap
 
 ### nanobot/agent/tools/hosts.py
 
@@ -419,13 +422,15 @@ Tool.execute(..., host="server")
     ↓
 ExecutionBackendRouter.resolve(host)
     ├─ host 为空 → LocalExecutionBackend
-    └─ host 非空 → HostManager.get_or_connect(host)
+    └─ host 非空 → HostManager.get_or_connect(host)  ← 不 ping，信任 auto-heal
                     ↓
                  RemoteExecutionBackend
                     ↓
                  RemoteHost._rpc(request_id + structured message)
-                    ↓
-                 WebSocket → remote_server.py → 返回
+                    ├─ transport 断 → auto-heal (_recover_transport)
+                    │   ├─ SSH 失败 → "Network unreachable"
+                    │   └─ WS 失败  → "Remote server not responding"
+                    └─ transport 好 → WebSocket → remote_server.py → 返回
     ↓
 结果返回用户
 ```
@@ -510,8 +515,8 @@ ExecutionBackendRouter.resolve(host)
 - `list/add/connect/disconnect/status/exec`
 
 LLM 因此知道：
-- 主机管理动作走 `hosts`
-- 业务动作走 `exec/read_file/...` + `host` 参数
+- 主机管理动作走 `hosts`（`connect` 仅在用户明确要求或 exec 报错后使用）
+- 业务动作走 `exec/read_file/...` + `host` 参数（自动连接，无需先 `connect`）
 
 #### 最小可读形态（给 reviewer）
 
@@ -537,14 +542,16 @@ Tools:
 
 ### 连接错误
 
-| 错误 | 原因 | 恢复方法 |
-|------|------|----------|
-| SSH 隧道失败 | SSH 不可访问 | 检查 SSH 连接 |
-| WebSocket 超时 | 主机未启动 | 检查远程 Python/uv |
+| 错误信息 | 原因 | 恢复方法 |
+|---------|------|----------|
+| `Network unreachable: SSH tunnel failed` | SSH 不可访问（网络断/SSH 配置错） | 检查网络和 SSH 配置 |
+| `Remote server not responding: WebSocket failed` | 远程 remote_server 未运行或已崩溃 | 用户 `connect` 触发重新部署 |
 | 认证失败 | 无效令牌 | 检查令牌配置 |
-| 连接丢失 | 网络问题 | 传输层自动恢复（重建 tunnel + WS + auth） |
 
-> 约束：自动恢复只做 transport recovery，**不会**隐式 redeploy 或创建新 session。若恢复失败，直接报错给用户。
+> 约束：`_rpc()` auto-heal 只做 transport recovery（重建 SSH 隧道 + WebSocket + auth），**不会**隐式 redeploy 或创建新 session。
+> - `get_or_connect()`（exec/router）：auto-heal 失败则报错，不重新部署
+> - `connect()`（用户主动）：auto-heal 失败则 disconnect → 全新部署
+> - resume 失败时**不清除** `active_session`（网络可能恢复，保留备用）
 
 ### 命令错误
 

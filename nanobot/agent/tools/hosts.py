@@ -35,10 +35,10 @@ Actions:
 - list: List all configured hosts and their status
 - add: Add a new host (requires: name, ssh_host)
 - remove: Remove a host (requires: name)
-- connect: Connect to a host (requires: name)
+- connect: Establish or repair connection to a host. Only use when user explicitly asks to connect, or after exec reports connection failure. Do NOT call before every exec. (requires: name)
 - disconnect: ⚠️ TEARDOWN: kills remote_server, tmux session, and deletes /tmp/nanobot-* — use only when completely done (requires: name)
 - status: Get status of a host (requires: name)
-- exec: Execute a command on a host (requires: name, command)
+- exec: Execute a command on a host. Auto-connects if needed, auto-heals on transport issues. Just call this directly. (requires: name, command)
 
 Examples:
 - hosts action="list"

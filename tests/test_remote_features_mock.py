@@ -110,17 +110,33 @@ async def test_rpc_returns_error_when_auto_recover_fails():
 
 
 @pytest.mark.asyncio
-async def test_host_manager_get_or_connect_returns_existing_object():
+async def test_host_manager_connect_returns_existing_if_ping_ok():
+    """connect() returns in-memory host when ping succeeds."""
     hosts_cfg = HostsConfig()
     hosts_cfg.add_host(HostConfig(name="h1", ssh_host="u@host"))
 
     mgr = HostManager(hosts_cfg)
     existing = RemoteHost(hosts_cfg.get_host("h1"))
-    existing._running = False
-    existing._authenticated = False
+    existing.ping = AsyncMock(return_value=True)
 
     mgr._connections["h1"] = existing
-    mgr.connect = AsyncMock(side_effect=AssertionError("connect() should not be called"))
+
+    got = await mgr.connect("h1")
+
+    assert got is existing
+
+
+@pytest.mark.asyncio
+async def test_host_manager_get_or_connect_returns_existing_without_ping():
+    """get_or_connect() returns in-memory host without ping."""
+    hosts_cfg = HostsConfig()
+    hosts_cfg.add_host(HostConfig(name="h1", ssh_host="u@host"))
+
+    mgr = HostManager(hosts_cfg)
+    existing = RemoteHost(hosts_cfg.get_host("h1"))
+    existing._running = False  # unhealthy, but get_or_connect doesn't care
+
+    mgr._connections["h1"] = existing
 
     got = await mgr.get_or_connect("h1")
 
