@@ -454,8 +454,7 @@ class FileService:
 async def handle_connection(
     websocket,
     auth_token: str,
-    use_tmux: bool,
-    session_dir: str = None,
+    executor: "CommandExecutor",
     stop_event: asyncio.Event = None,
 ):
     """Handle WebSocket connection.
@@ -497,11 +496,7 @@ async def handle_connection(
         logger.error(f"Authentication error: {e}")
         return
 
-    # Use socket in session directory
-    socket_path = f"{session_dir}/tmux.sock" if session_dir else "/tmp/nanobot-tmux.sock"
-    logger.info(f"Using tmux socket: {socket_path}")
-    
-    executor = CommandExecutor(use_tmux=use_tmux, socket_path=socket_path)
+    logger.info(f"Reusing server-level executor (tmux persistent across reconnects)")
 
     async def _dispatch_message(data: dict) -> tuple[dict, bool]:
         """Dispatch one protocol message. Returns (response, should_break)."""
@@ -648,9 +643,7 @@ async def handle_connection(
                 }))
 
     except websockets.exceptions.ConnectionClosed:
-        logger.info("Connection closed")
-    finally:
-        executor.cleanup()
+        logger.info("Connection closed (tmux session preserved for reconnect)")
 
 
 async def main():
@@ -745,12 +738,17 @@ async def main():
         cwd = os.getcwd()
         session_dir = cwd if os.path.basename(cwd).startswith("nanobot-") else None
 
-    handler = lambda ws: handle_connection(ws, token, use_tmux, session_dir, stop_event)
+    socket_path = f"{session_dir}/tmux.sock" if session_dir else "/tmp/nanobot-tmux.sock"
+    logger.info(f"Using tmux socket: {socket_path}")
+    executor = CommandExecutor(use_tmux=use_tmux, socket_path=socket_path)
+
+    handler = lambda ws: handle_connection(ws, token, executor, stop_event)
 
     async with websockets.serve(handler, "0.0.0.0", port):
         logger.info(f"Server listening on ws://0.0.0.0:{port}")
         await stop_event.wait()
 
+    executor.cleanup()
     logger.info("remote_server stopped")
 
 

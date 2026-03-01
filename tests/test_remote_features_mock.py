@@ -269,10 +269,10 @@ async def test_handle_connection_same_request_id_same_payload_returns_cached(mon
     req = {"request_id": "rid-1", "type": "exec", "command": "echo hi"}
     ws = FakeServerWebSocket(messages=[req, req])
 
-    await remote_server.handle_connection(ws, auth_token="", use_tmux=False)
+    await remote_server.handle_connection(ws, auth_token="", executor=FakeExecutor())
 
     assert FakeExecutor.calls == 1
-    assert FakeExecutor.cleaned == 1
+    assert FakeExecutor.cleaned == 0  # cleanup now only on server shutdown, not connection close
     assert ws.sent[0]["type"] == "authenticated"
     assert ws.sent[1]["type"] == "result"
     assert ws.sent[2]["type"] == "result"
@@ -308,7 +308,7 @@ async def test_handle_connection_same_request_id_different_payload_rejected(monk
         ]
     )
 
-    await remote_server.handle_connection(ws, auth_token="", use_tmux=False)
+    await remote_server.handle_connection(ws, auth_token="", executor=FakeExecutor())
 
     assert FakeExecutor.calls == 1
     assert ws.sent[1]["type"] == "result"
@@ -346,10 +346,10 @@ async def test_handle_connection_inflight_dedupe_across_connections(monkeypatch)
     ws1 = FakeServerWebSocket(messages=[req])
     ws2 = FakeServerWebSocket(messages=[req])
 
-    t1 = asyncio.create_task(remote_server.handle_connection(ws1, auth_token="", use_tmux=False))
+    t1 = asyncio.create_task(remote_server.handle_connection(ws1, auth_token="", executor=SlowExecutor()))
     await asyncio.wait_for(SlowExecutor.started.wait(), timeout=1.0)
 
-    t2 = asyncio.create_task(remote_server.handle_connection(ws2, auth_token="", use_tmux=False))
+    t2 = asyncio.create_task(remote_server.handle_connection(ws2, auth_token="", executor=SlowExecutor()))
     await asyncio.sleep(0.05)
     SlowExecutor.release.set()
 
@@ -366,7 +366,7 @@ async def test_handle_connection_inflight_dedupe_across_connections(monkeypatch)
 async def test_handle_connection_auth_failure_returns_error_only():
     ws = FakeServerWebSocket(messages=[], auth_token="wrong-token")
 
-    await remote_server.handle_connection(ws, auth_token="expected-token", use_tmux=False)
+    await remote_server.handle_connection(ws, auth_token="expected-token", executor=remote_server.CommandExecutor(use_tmux=False))
 
     assert len(ws.sent) == 1
     assert ws.sent[0]["type"] == "error"
