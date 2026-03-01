@@ -322,7 +322,7 @@ class TranscriptionConfig(Base):
 class TTSConfig(Base):
     """Text-to-speech configuration (edge-tts)."""
 
-    enabled: bool = False
+    mode: str = "off"  # "off", "auto" (voice-triggered only), "on" (all replies)
     voice: str = "zh-CN-XiaoxiaoNeural"
     rate: str = "+0%"
     volume: str = "+0%"
@@ -337,9 +337,6 @@ class ToolsConfig(Base):
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     tts: TTSConfig = Field(default_factory=TTSConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
-    block_sensitive_files: bool = True   # If true, block access to sensitive files (env, keys, etc.)
-    redact_tool_outputs: bool = True     # If true, redact sensitive data from tool outputs
-    redact_context: bool = True          # If true, redact sensitive data before sending to LLM
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
