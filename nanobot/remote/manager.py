@@ -101,6 +101,9 @@ class HostManager:
         if config:
             config.active_session = {
                 "session_id": host.session_id,
+                "local_port": config.local_port,
+                "remote_port": config.remote_port,
+                "auth_token": config.auth_token,
             }
             self.config.save()
             logger.info(f"Saved session info for '{name}' (session: {host.session_id})")
@@ -123,6 +126,14 @@ class HostManager:
         if not session_id:
             self._clear_session(name)
             return None
+
+        # Restore dynamic fields from persisted session
+        if config.active_session.get("local_port"):
+            config.local_port = config.active_session["local_port"]
+        if config.active_session.get("remote_port"):
+            config.remote_port = config.active_session["remote_port"]
+        if config.active_session.get("auth_token"):
+            config.auth_token = config.active_session["auth_token"]
 
         logger.info(f"Attempting to resume session '{session_id}' on '{name}'...")
 
