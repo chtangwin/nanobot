@@ -311,11 +311,20 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # Seconds before a tool call is cancelled
 
 
+class TranscriptionConfig(Base):
+    """Transcription (STT) configuration."""
+
+    provider: str = "groq"  # "groq" or "deepgram"
+    api_key: str = ""  # API key for the selected provider
+    model: str = ""  # STT model (default: whisper-large-v3 for groq, nova-3 for deepgram)
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 

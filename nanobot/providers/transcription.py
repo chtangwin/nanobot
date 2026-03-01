@@ -19,12 +19,15 @@ class GroqTranscriptionProvider:
         self.api_key = api_key or os.environ.get("GROQ_API_KEY")
         self.api_url = "https://api.groq.com/openai/v1/audio/transcriptions"
     
-    async def transcribe(self, file_path: str | Path) -> str:
+    async def transcribe(
+        self, file_path: str | Path, mime_type: str | None = None
+    ) -> str:
         """
         Transcribe an audio file using Groq.
         
         Args:
             file_path: Path to the audio file.
+            mime_type: Ignored (Groq uses multipart, detects format itself).
             
         Returns:
             Transcribed text.
