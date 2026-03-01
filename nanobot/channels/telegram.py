@@ -12,7 +12,7 @@ from telegram.request import HTTPXRequest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import TelegramConfig
+from nanobot.config.schema import TelegramConfig, TranscriptionConfig
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -119,11 +119,11 @@ class TelegramChannel(BaseChannel):
         self,
         config: TelegramConfig,
         bus: MessageBus,
-        groq_api_key: str = "",
+        transcription_config: "TranscriptionConfig | None" = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
-        self.groq_api_key = groq_api_key
+        self.transcription_config = transcription_config
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -217,6 +217,32 @@ class TelegramChannel(BaseChannel):
         if ext in ("mp3", "m4a", "wav", "aac"):
             return "audio"
         return "document"
+
+    async def _transcribe_media(
+        self, file_path: str, media_type: str, mime_type: str | None = None
+    ) -> str:
+        """Transcribe audio/voice file using configured provider."""
+        cfg = self.transcription_config
+
+        # Default to Groq if not configured
+        provider = (cfg.provider or "groq") if cfg else "groq"
+
+        try:
+            if provider == "deepgram":
+                from nanobot.providers.deepgram_transcription import DeepgramTranscriptionProvider
+                model = (cfg.model if cfg and cfg.model else "nova-3")
+                transcriber = DeepgramTranscriptionProvider(
+                    api_key=cfg.api_key if cfg else None, model=model
+                )
+            else:
+                from nanobot.providers.transcription import GroqTranscriptionProvider
+                transcriber = GroqTranscriptionProvider(api_key=cfg.api_key if cfg else None)
+
+            return await transcriber.transcribe(file_path, mime_type=mime_type)
+
+        except Exception as e:
+            logger.error("Transcription failed: {}", e)
+            return ""
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
@@ -385,9 +411,8 @@ class TelegramChannel(BaseChannel):
                 
                 # Handle voice transcription
                 if media_type == "voice" or media_type == "audio":
-                    from nanobot.providers.transcription import GroqTranscriptionProvider
-                    transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
-                    transcription = await transcriber.transcribe(file_path)
+                    mime = getattr(media_file, "mime_type", None)
+                    transcription = await self._transcribe_media(file_path, media_type, mime)
                     if transcription:
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])
                         content_parts.append(f"[transcription: {transcription}]")
