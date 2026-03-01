@@ -319,12 +319,23 @@ class TranscriptionConfig(Base):
     model: str = ""  # STT model (default: whisper-large-v3 for groq, nova-3 for deepgram)
 
 
+class TTSConfig(Base):
+    """Text-to-speech configuration (edge-tts)."""
+
+    enabled: bool = False
+    voice: str = "zh-CN-XiaoxiaoNeural"
+    rate: str = "+0%"
+    volume: str = "+0%"
+    pitch: str = "+0Hz"
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
+    tts: TTSConfig = Field(default_factory=TTSConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     block_sensitive_files: bool = True   # If true, block access to sensitive files (env, keys, etc.)
     redact_tool_outputs: bool = True     # If true, redact sensitive data from tool outputs

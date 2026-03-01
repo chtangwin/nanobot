@@ -42,6 +42,7 @@ class ChannelManager:
                     self.config.channels.telegram,
                     self.bus,
                     transcription_config=self.config.tools.transcription,
+                    tts_config=self.config.tools.tts,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:
