@@ -12,7 +12,7 @@ from telegram.request import HTTPXRequest
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import TelegramConfig
+from nanobot.config.schema import TelegramConfig, TTSConfig
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -112,6 +112,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
+        BotCommand("tts", "Toggle voice reply (on/off/auto)"),
         BotCommand("help", "Show available commands"),
     ]
     
@@ -120,13 +121,17 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
+        tts_config: "TTSConfig | None" = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
+        self.tts_config = tts_config
+        self.tts_mode = (tts_config.mode if tts_config else "off")  # runtime override
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
+        self._voice_chats: set[str] = set()  # chat_ids that sent voice → reply with voice
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
     
@@ -150,6 +155,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
+        self._app.add_handler(CommandHandler("tts", self._on_tts))
         
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
@@ -287,7 +293,55 @@ class TelegramChannel(BaseChannel):
                         )
                     except Exception as e2:
                         logger.error("Error sending Telegram message: {}", e2)
+
+            # TTS voice reply for voice-triggered chats
+            await self._maybe_send_tts(chat_id, msg.content, reply_params)
     
+    async def _maybe_send_tts(self, chat_id: int, text: str, reply_params) -> None:
+        """Send TTS voice reply based on tts_mode."""
+        if self.tts_mode == "off" or not self.tts_config:
+            return
+
+        str_id = str(chat_id)
+        is_voice_triggered = str_id in self._voice_chats
+        self._voice_chats.discard(str_id)
+
+        # auto: only reply with voice when user sent voice
+        if self.tts_mode == "auto" and not is_voice_triggered:
+            return
+
+        try:
+            import io
+            from nanobot.providers.tts import EdgeTTSProvider
+
+            provider = EdgeTTSProvider(
+                voice=self.tts_config.voice,
+                rate=self.tts_config.rate,
+                volume=self.tts_config.volume,
+                pitch=self.tts_config.pitch,
+            )
+            audio_bytes, ext = await provider.speak(text)
+            if not audio_bytes:
+                return
+
+            audio_io = io.BytesIO(audio_bytes)
+            audio_io.name = f"reply{ext}"
+
+            # mp3 → send as audio; ogg → send as voice (inline playback)
+            if ext == ".ogg":
+                await self._app.bot.send_voice(
+                    chat_id=chat_id, voice=audio_io, reply_parameters=reply_params
+                )
+            else:
+                await self._app.bot.send_audio(
+                    chat_id=chat_id, audio=audio_io, title="voice reply",
+                    reply_parameters=reply_params
+                )
+            logger.info("TTS voice reply sent to chat {}", chat_id)
+
+        except Exception as e:
+            logger.error("TTS reply failed: {}", e)
+
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
         if not update.message or not update.effective_user:
@@ -308,8 +362,32 @@ class TelegramChannel(BaseChannel):
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
+            "/tts — Voice reply (on/off/auto)\n"
             "/help — Show available commands"
         )
+
+    async def _on_tts(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /tts command to toggle voice reply mode at runtime."""
+        if not update.message:
+            return
+
+        arg = (context.args[0].lower() if context.args else "").strip()
+
+        if arg in ("on", "off", "auto"):
+            self.tts_mode = arg
+            labels = {"on": "ON (all replies)", "off": "OFF", "auto": "AUTO (voice-triggered)"}
+            await update.message.reply_text(f"TTS: {labels[arg]}")
+        else:
+            labels = {"on": "ON (all replies)", "off": "OFF", "auto": "AUTO (voice-triggered)"}
+            current = labels.get(self.tts_mode, self.tts_mode)
+            voice = self.tts_config.voice if self.tts_config else "n/a"
+            await update.message.reply_text(
+                f"TTS: {current}\n"
+                f"Voice: {voice}\n\n"
+                "/tts on — voice reply for all messages\n"
+                "/tts auto — voice reply only for voice input\n"
+                "/tts off — disable voice reply"
+            )
 
     @staticmethod
     def _sender_id(user) -> str:
@@ -393,6 +471,8 @@ class TelegramChannel(BaseChannel):
                         content_parts.append(f"[transcription: {transcription}]")
                     else:
                         content_parts.append(f"[{media_type}: {file_path}]")
+                    # Mark this chat for TTS reply (used by auto mode)
+                    self._voice_chats.add(str(chat_id))
                 else:
                     content_parts.append(f"[{media_type}: {file_path}]")
                     

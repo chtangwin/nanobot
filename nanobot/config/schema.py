@@ -311,11 +311,22 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # Seconds before a tool call is cancelled
 
 
+class TTSConfig(Base):
+    """Text-to-speech configuration (edge-tts)."""
+
+    mode: str = "off"  # "off", "auto" (voice-triggered only), "on" (all replies)
+    voice: str = "zh-CN-XiaoxiaoNeural"
+    rate: str = "+0%"
+    volume: str = "+0%"
+    pitch: str = "+0Hz"
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    tts: TTSConfig = Field(default_factory=TTSConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
