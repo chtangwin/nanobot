@@ -515,6 +515,7 @@ async def handle_connection(
             path = data.get("path")
             if not path:
                 return ({"type": "error", "message": "No path provided"}, False)
+            logger.info(f"read_file: {path}")
             result = await FileService.read_file(path)
             return ({"type": "result", **result}, False)
 
@@ -522,6 +523,7 @@ async def handle_connection(
             path = data.get("path")
             if not path:
                 return ({"type": "error", "message": "No path provided"}, False)
+            logger.info(f"read_bytes: {path}")
             result = await FileService.read_bytes(path)
             return ({"type": "result", **result}, False)
 
@@ -532,6 +534,7 @@ async def handle_connection(
                 return ({"type": "error", "message": "No path provided"}, False)
             if content is None:
                 return ({"type": "error", "message": "No content provided"}, False)
+            logger.info(f"write_file: {path}")
             result = await FileService.write_file(path, content)
             return ({"type": "result", **result}, False)
 
@@ -543,6 +546,7 @@ async def handle_connection(
                 return ({"type": "error", "message": "No path provided"}, False)
             if old_text is None or new_text is None:
                 return ({"type": "error", "message": "old_text/new_text required"}, False)
+            logger.info(f"edit_file: {path}")
             result = await FileService.edit_file(path, old_text, new_text)
             return ({"type": "result", **result}, False)
 
@@ -550,6 +554,7 @@ async def handle_connection(
             path = data.get("path")
             if not path:
                 return ({"type": "error", "message": "No path provided"}, False)
+            logger.info(f"list_dir: {path}")
             result = await FileService.list_dir(path)
             return ({"type": "result", **result}, False)
 
