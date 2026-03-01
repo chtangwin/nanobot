@@ -22,7 +22,6 @@ class HostConfig:
 
     def to_dict(self) -> dict:
         return {
-            "name": self.name,
             "ssh_host": self.ssh_host,
             "ssh_port": self.ssh_port,
             "ssh_key_path": self.ssh_key_path,
@@ -33,8 +32,8 @@ class HostConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "HostConfig":
-        return cls(**data)
+    def from_dict(cls, name: str, data: dict) -> "HostConfig":
+        return cls(name=name, **data)
 
 
 @dataclass
@@ -71,7 +70,7 @@ class HostsConfig:
 
         data = json.loads(config_file.read_text())
         raw_hosts = data.get("hosts") or {}
-        hosts = {name: HostConfig.from_dict(item) for name, item in raw_hosts.items()}
+        hosts = {name: HostConfig.from_dict(name, item) for name, item in raw_hosts.items()}
         return cls(hosts=hosts, config_file=config_file)
 
     @classmethod

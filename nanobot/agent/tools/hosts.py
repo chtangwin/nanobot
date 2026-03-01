@@ -180,11 +180,15 @@ Examples:
         if not name:
             return "Error: 'name' parameter is required for connect action"
         try:
+            logger.info(f"Connecting to host '{name}'...")
             host = await self.manager.connect(name)
-            return f"✓ Connected to '{name}' (session: {host.session_id})"
+            logger.info(f"Connected to '{name}' (session: {host.session_id})")
+            return f"✓ Connected to '{name}' (session: {host.session_id}). Use hosts action=\"exec\" to run commands on this host."
         except KeyError:
+            logger.warning(f"Host '{name}' not found in config")
             return f"Error: Host '{name}' not found. Use 'hosts action=\"add\"' first"
         except Exception as e:
+            logger.error(f"Failed to connect to '{name}': {e}", exc_info=True)
             return f"Error: Failed to connect to '{name}': {e}"
 
     async def _disconnect_host(self, name: str) -> str:
