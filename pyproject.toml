@@ -42,11 +42,13 @@ dependencies = [
     "prompt-toolkit>=3.0.50,<4.0.0",
     "mcp>=1.26.0,<2.0.0",
     "json-repair>=0.57.0,<1.0.0",
-    "playwright>=1.58.0",
-    "trafilatura>=2.0.0",
 ]
 
 [project.optional-dependencies]
+web = [
+    "playwright>=1.58.0",
+    "trafilatura>=2.0.0",
+]
 tts = [
     "edge-tts>=7.2.7",
 ]
