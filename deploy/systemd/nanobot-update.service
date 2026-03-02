@@ -8,7 +8,8 @@ Type=oneshot
 WorkingDirectory=%h/nanobot
 Environment=APP_DIR=%h/nanobot
 Environment=SERVICE_NAME=nanobot.service
-Environment=SYSTEMCTL_CMD=systemctl --user
+Environment=SYSTEMCTL_CMD=systemctl
+Environment=SYSTEMCTL_SCOPE=--user
 Environment=UV_SYNC_ARGS=--extra tts
 ExecStart=/bin/bash %h/nanobot/deploy/update.sh
 

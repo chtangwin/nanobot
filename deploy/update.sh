@@ -12,7 +12,8 @@ PATH=${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin
 APP_DIR="${APP_DIR:-$HOME/nanobot}"
 UV_BIN="${UV_BIN:-uv}"
 SERVICE_NAME="${SERVICE_NAME:-nanobot.service}"
-SYSTEMCTL_CMD="${SYSTEMCTL_CMD:-systemctl --user}"
+SYSTEMCTL_CMD="${SYSTEMCTL_CMD:-systemctl}"
+SYSTEMCTL_SCOPE="${SYSTEMCTL_SCOPE:---user}"
 GIT_REMOTE="${GIT_REMOTE:-origin}"
 GIT_BRANCH="${GIT_BRANCH:-dev-combined}"
 
@@ -32,6 +33,10 @@ echo "[update] syncing dependencies: $UV_BIN sync --extra tts"
 "$UV_BIN" sync --extra tts
 
 echo "[update] restarting $SERVICE_NAME ..."
-$SYSTEMCTL_CMD restart "$SERVICE_NAME"
+if [[ -n "$SYSTEMCTL_SCOPE" ]]; then
+  "$SYSTEMCTL_CMD" "$SYSTEMCTL_SCOPE" restart "$SERVICE_NAME"
+else
+  "$SYSTEMCTL_CMD" restart "$SERVICE_NAME"
+fi
 
 echo "[update] done"
