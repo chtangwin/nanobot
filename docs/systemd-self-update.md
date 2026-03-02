@@ -13,7 +13,7 @@
 ```bash
 cd "$HOME/nanobot"
 git pull --ff-only
-uv sync
+uv sync --extra tts
 ```
 
 ## 2) 安装 systemd 用户服务文件
@@ -114,5 +114,5 @@ journalctl -f _SYSTEMD_USER_UNIT=nanobot-update.service
 
 ## 备注
 
-- 更新流程由 `deploy/update.sh` 执行：`git pull --ff-only` + `uv sync` + 重启 `nanobot.service`。
+- 更新流程由 `deploy/update.sh` 执行：`git pull --ff-only` + `uv sync --extra tts` + 重启 `nanobot.service`（可通过 `UV_SYNC_ARGS` 覆盖）。
 - `nanobot.service` 使用 SIGTERM 停止，nanobot 会走清理流程（MCP/channels/cron/heartbeat）。

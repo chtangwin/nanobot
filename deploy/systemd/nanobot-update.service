@@ -9,6 +9,7 @@ WorkingDirectory=%h/nanobot
 Environment=APP_DIR=%h/nanobot
 Environment=SERVICE_NAME=nanobot.service
 Environment=SYSTEMCTL_CMD=systemctl --user
+Environment=UV_SYNC_ARGS=--extra tts
 ExecStart=/bin/bash %h/nanobot/deploy/update.sh
 
 # Security hardening (optional, relax if your environment needs it)

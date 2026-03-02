@@ -14,6 +14,7 @@ SERVICE_NAME="${SERVICE_NAME:-nanobot.service}"
 SYSTEMCTL_CMD="${SYSTEMCTL_CMD:-systemctl --user}"
 GIT_REMOTE="${GIT_REMOTE:-origin}"
 GIT_BRANCH="${GIT_BRANCH:-dev-combined}"
+UV_SYNC_ARGS="${UV_SYNC_ARGS:---extra tts}"
 
 cd "$APP_DIR"
 
@@ -27,8 +28,9 @@ git checkout "$GIT_BRANCH"
 echo "[update] pulling latest commit (ff-only) from ${GIT_REMOTE}/${GIT_BRANCH} ..."
 git pull --ff-only "$GIT_REMOTE" "$GIT_BRANCH"
 
-echo "[update] syncing dependencies..."
-"$UV_BIN" sync
+echo "[update] syncing dependencies: $UV_BIN sync $UV_SYNC_ARGS"
+read -r -a uv_sync_args_array <<< "$UV_SYNC_ARGS"
+"$UV_BIN" sync "${uv_sync_args_array[@]}"
 
 echo "[update] restarting $SERVICE_NAME ..."
 $SYSTEMCTL_CMD restart "$SERVICE_NAME"

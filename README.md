@@ -1115,7 +1115,7 @@ This repo also includes templates under `deploy/systemd/` (for user-level system
 
 - `deploy/systemd/nanobot.service` — long-running gateway service
 - `deploy/systemd/nanobot-update.service` — one-shot update task
-- `deploy/update.sh` — update script (`git pull --ff-only` + `uv sync` + service restart)
+- `deploy/update.sh` — update script (`git pull --ff-only` + `uv sync --extra tts` + service restart, override via `UV_SYNC_ARGS`)
 
 Path convention in templates: `%h/nanobot` (equivalent to `$HOME/nanobot`).
 
