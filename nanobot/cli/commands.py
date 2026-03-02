@@ -291,6 +291,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        self_update_config=config.gateway.self_update,
     )
     
     # Set cron callback (needs agent)
@@ -376,7 +377,14 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
-    
+
+    def _exit_on_signal(_signum, _frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, _exit_on_signal)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _exit_on_signal)
+
     async def run():
         try:
             await cron.start()
@@ -449,6 +457,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        self_update_config=config.gateway.self_update,
     )
     
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -940,6 +949,7 @@ def cron_run(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        self_update_config=config.gateway.self_update,
     )
 
     store_path = get_data_dir() / "cron" / "jobs.json"
