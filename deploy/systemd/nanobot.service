@@ -1,0 +1,21 @@
+[Unit]
+Description=nanobot gateway service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/nanobot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/env uv run nanobot gateway
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Journald logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

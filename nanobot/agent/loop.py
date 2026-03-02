@@ -32,7 +32,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, SelfUpdateConfig
     from nanobot.cron.service import CronService
 
 
@@ -68,8 +68,9 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        self_update_config: SelfUpdateConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, SelfUpdateConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -82,6 +83,7 @@ class AgentLoop:
         self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
+        self.self_update_config = self_update_config or SelfUpdateConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
@@ -351,6 +353,46 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
+    def _is_self_update_admin(self, sender_id: str) -> bool:
+        """Check whether sender is allowed to run self-update admin commands."""
+        allow = self.self_update_config.allow_from
+        if not allow:
+            return False
+        sender = str(sender_id)
+        if sender in allow:
+            return True
+        if "|" in sender:
+            return any(part and part in allow for part in sender.split("|"))
+        return False
+
+    async def _run_self_update_command(self, action: str) -> tuple[bool, str]:
+        """Run a configured self-update command."""
+        command_map = {
+            "update": self.self_update_config.update_command,
+            "restart": self.self_update_config.restart_command,
+            "status": self.self_update_config.status_command,
+        }
+        command = command_map.get(action, "")
+        if not command:
+            return False, f"No command configured for action: {action}"
+
+        backend = LocalExecutionBackend(
+            workspace=self.workspace,
+            path_append=self.exec_config.path_append,
+        )
+        result = await backend.exec(
+            command,
+            working_dir=str(self.workspace),
+            timeout=float(self.self_update_config.timeout),
+        )
+        if result.get("success"):
+            output = (result.get("output") or "").strip()
+            if output:
+                return True, output[:1200]
+            return True, "OK"
+        err = ((result.get("error") or "").strip() or "Command failed")
+        return False, err[:1200]
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -384,7 +426,50 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         # Slash commands
-        cmd = msg.content.strip().lower()
+        raw_cmd = msg.content.strip()
+        cmd = raw_cmd.lower()
+
+        if cmd.startswith("/admin"):
+            if not self.self_update_config.enabled:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="Self-update is disabled.",
+                )
+            if not self._is_self_update_admin(msg.sender_id):
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="Unauthorized: admin permission required.",
+                )
+
+            parts = cmd.split(maxsplit=1)
+            action = parts[1].strip() if len(parts) > 1 else ""
+            if action not in {"update", "restart", "status"}:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=(
+                        "Admin commands:\n"
+                        "/admin update — start update workflow\n"
+                        "/admin restart — restart nanobot service\n"
+                        "/admin status — check nanobot service status"
+                    ),
+                )
+
+            ok, output = await self._run_self_update_command(action)
+            if ok:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=f"✅ /admin {action} executed.\n{output}",
+                )
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"❌ /admin {action} failed.\n{output}",
+            )
+
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
             self._consolidating.add(session.key)
@@ -414,8 +499,15 @@ class AgentLoop:
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
         if cmd == "/help":
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+            help_text = (
+                "🐈 nanobot commands:\n"
+                "/new — Start a new conversation\n"
+                "/stop — Stop the current task\n"
+                "/help — Show available commands"
+            )
+            if self.self_update_config.enabled:
+                help_text += "\n/admin update|restart|status — Admin self-update operations"
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=help_text)
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):

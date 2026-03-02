@@ -273,12 +273,24 @@ class HeartbeatConfig(Base):
     interval_s: int = 30 * 60  # 30 minutes
 
 
+class SelfUpdateConfig(Base):
+    """Self-update command configuration (for admin-only runtime updates)."""
+
+    enabled: bool = False
+    allow_from: list[str] = Field(default_factory=list)
+    update_command: str = "systemctl --user start nanobot-update.service"
+    restart_command: str = "systemctl --user restart nanobot.service"
+    status_command: str = "systemctl --user status nanobot --no-pager -n 20"
+    timeout: int = 120
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    self_update: SelfUpdateConfig = Field(default_factory=SelfUpdateConfig)
 
 
 class WebSearchConfig(Base):
