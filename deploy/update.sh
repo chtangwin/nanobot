@@ -12,15 +12,20 @@ APP_DIR="${APP_DIR:-$HOME/nanobot}"
 UV_BIN="${UV_BIN:-uv}"
 SERVICE_NAME="${SERVICE_NAME:-nanobot.service}"
 SYSTEMCTL_CMD="${SYSTEMCTL_CMD:-systemctl --user}"
+GIT_REMOTE="${GIT_REMOTE:-origin}"
+GIT_BRANCH="${GIT_BRANCH:-dev-combined}"
 
 cd "$APP_DIR"
 
 echo "[update] app dir: $APP_DIR"
-echo "[update] fetching latest code..."
-git fetch --all --prune
+echo "[update] fetching latest code from ${GIT_REMOTE}/${GIT_BRANCH} ..."
+git fetch "$GIT_REMOTE" "$GIT_BRANCH" --prune
 
-echo "[update] pulling latest commit (ff-only)..."
-git pull --ff-only
+echo "[update] checking out ${GIT_BRANCH} ..."
+git checkout "$GIT_BRANCH"
+
+echo "[update] pulling latest commit (ff-only) from ${GIT_REMOTE}/${GIT_BRANCH} ..."
+git pull --ff-only "$GIT_REMOTE" "$GIT_BRANCH"
 
 echo "[update] syncing dependencies..."
 "$UV_BIN" sync
