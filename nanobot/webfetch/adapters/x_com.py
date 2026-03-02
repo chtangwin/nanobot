@@ -17,10 +17,13 @@ from nanobot.webfetch.adapters.base import Adapter
 from nanobot.webfetch.core.extractors import clean_text
 from nanobot.webfetch.core.models import DEFAULT_HEADERS, FetchConfig, FetchResult
 
-# Auth file search paths (first match wins)
+# Auth file search paths (first match wins):
+#   1. x-scraper skill directory (canonical location, shared with skill)
+#   2. Same directory as this adapter code (code-local fallback)
+_ADAPTER_DIR = Path(__file__).parent
 _AUTH_SEARCH_PATHS = [
-    Path.home() / ".nanobot" / "x_auth.json",
     Path.home() / ".pi" / "agent" / "skills" / "x-scraper" / "x_auth.json",
+    _ADAPTER_DIR / "x_auth.json",
 ]
 
 # JS: extract tweets from current viewport

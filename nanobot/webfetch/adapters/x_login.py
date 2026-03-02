@@ -11,7 +11,10 @@ import sys
 import time
 from pathlib import Path
 
-AUTH_FILE = Path.home() / ".nanobot" / "x_auth.json"
+# Save to skill dir if it exists; otherwise save next to this code file
+_SKILL_DIR = Path.home() / ".pi" / "agent" / "skills" / "x-scraper"
+_CODE_DIR = Path(__file__).parent
+AUTH_FILE = (_SKILL_DIR / "x_auth.json") if _SKILL_DIR.is_dir() else (_CODE_DIR / "x_auth.json")
 
 
 def do_login(timeout_secs: int = 120) -> None:
