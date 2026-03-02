@@ -154,6 +154,20 @@ Add or merge these **two parts** into your config (other options have defaults).
 }
 ```
 
+*Optional: let provider/model defaults decide sampling/output length* (recommended):
+```json
+{
+  "agents": {
+    "defaults": {
+      "temperature": null,
+      "maxTokens": null
+    }
+  }
+}
+```
+
+When set to `null`, nanobot will not pass these fields to the provider request, so provider/model defaults apply. Model-specific overrides from the provider registry (for example Kimi K2.5 temperature) still take effect.
+
 **3. Chat**
 
 ```bash
@@ -814,6 +828,38 @@ That's it! Environment variables, model prefixing, config matching, and `nanobot
 
 </details>
 
+### Model Parameter Strategy (temperature / maxTokens)
+
+Recommended approach:
+
+1. Set global defaults to `null` (or omit the fields) so nanobot does not pass these parameters.
+2. Only override for models/providers with clear documented requirements.
+3. Prefer model/provider official guidance over one-size-fits-all values.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "temperature": null,
+      "maxTokens": null
+    }
+  }
+}
+```
+
+`null` and omitted fields behave the same: nanobot will not send `temperature` / `max_tokens` to provider requests.
+
+Suggested reference table (documentation convention, not hard-coded runtime policy):
+
+| Provider / Model | temperature | maxTokens | Notes |
+|---|---:|---:|---|
+| `openai/gpt-5.2` | `null` | `null` | Prefer `reasoning_effort` / verbosity-style controls. |
+| `zai/glm-4.7` | `1.0` (or `null`) | `null` | Official defaults are typically suitable; use `1.0` if you want explicit stability. |
+| `minimax/MiniMax-M2.5` | `1.0` (recommended) or `null` | `null` | Keep output length default unless task needs explicit cap. |
+| `moonshot/kimi-k2.5` | `1.0` | `null` | Keep at `1.0` due to model/provider constraints. |
+| `anthropic/claude-*` | `null` | `null` | Defaults are usually a good baseline. |
+| `gemini/*` | `null` | `null` | Start from defaults, tune per task only when needed. |
+| `deepseek/*` | `null` | `null` | Start from defaults, tune per task only when needed. |
 
 ### MCP (Model Context Protocol)
 
