@@ -36,9 +36,12 @@ def _extract_with_trafilatura(html: str, url: str) -> tuple[str, str | None]:
 
 def _extract_with_readability(html: str) -> tuple[str, str | None, str]:
     """Readability extraction. Returns (text, title, extractor_name)."""
-    doc = Document(html)
-    title = (doc.short_title() or "").strip() or None
-    summary_html = doc.summary(html_partial=True)
+    try:
+        doc = Document(html)
+        title = (doc.short_title() or "").strip() or None
+        summary_html = doc.summary(html_partial=True)
+    except Exception:
+        return "", None, "readability"
     text = re.sub(r"<script[\s\S]*?</script>", " ", summary_html, flags=re.I)
     text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
     text = re.sub(r"<[^>]+>", " ", text)
