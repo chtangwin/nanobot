@@ -331,7 +331,111 @@ Tool 层保留：
 
 设计文档的 4 个 Phase 划分合理，建议细化：
 
-- **Phase 1**（抽离 core）：创建 `nanobot/webfetch/` 包，拆分 models / extractors / quality / pipeline / browser，保留 `scripts/web_fetch_robust.py` 作为 thin wrapper 调用新 core。
+- **Phase 1**（抽离 core）：创建 `nanobot/webfetch/` 包，拆分 models / extractors / quality / pipeline / browser，保留 `scripts/web_fetch_robust.py` 作为 thin wrapper 调用新 core。 ✅ 已完成
 - **Phase 2**（接入 Tool）：修改 `WebFetchTool.execute()` 调用 `core.pipeline`，扩展入参和出参，保持默认行为兼容。
 - **Phase 3**（Adapter）：实现 `adapters/base.py` 接口 + `generic.py` + `x_com.py` + `registry.py`。
 - **Phase 4**（Benchmark）：固定三组基准 URL，自动化对比。
+
+---
+
+## 16. 测试套件（Test Suite）
+
+> 完成日期：2026-03-02 · 分支：`feature/webfetch`
+
+### 16.1 目录结构
+
+```text
+tests/webfetch/
+├── __init__.py
+├── conftest.py              # 基准目标定义 + HTML fixtures + shared fixtures
+├── test_models.py           # 7 tests  — FetchConfig / FetchResult / DEFAULT_HEADERS
+├── test_extractors.py       # 10 tests — clean_text / extract_main_text / merge
+├── test_quality.py          # 20 tests — SPA 检测 / 低质量判定 / 升级逻辑
+├── test_browser.py          # 7 tests  — discovery 循环 (stall/click/scroll/max/dedup)
+├── test_pipeline.py         # 19 tests — URL 规范化 / HTTP / 升级 / force / discovery / 字段
+└── test_integration.py      # 10 tests — 4 个基准 URL 的真实网络测试 (@integration)
+```
+
+### 16.2 运行方式
+
+```bash
+# 单元测试 (73 tests, ~1.5s, 无需网络)
+uv run pytest tests/webfetch/ -m "not integration" -v
+
+# 集成测试 (需网络 + chromium)
+uv run pytest tests/webfetch/test_integration.py -v
+
+# 全部
+uv run pytest tests/webfetch/ -v
+```
+
+### 16.3 基准目标（Benchmark Targets）
+
+定义在 `conftest.py` 的 `BENCHMARKS` 字典中，供集成测试和后续 Phase 4 自动化 benchmark 引用：
+
+| Key | URL | 测试场景 | 期望 source_tier |
+|-----|-----|---------|-----------------|
+| `plain_html` | `https://httpbin.org/html` | 纯静态 HTML（Melville 选段） | `http` |
+| `javascript_spa` | `https://ip.sb/` | JS 动态页面，HTTP 只拿到 nav | `browser`（自动升级） |
+| `discovery_pagination` | `https://airank.dev` | SPA + See More + 分页 Next | `browser`（discovery） |
+| `adapter_x` | `https://x.com/elonmusk` | 强反爬，需专用适配器 | `adapter:x_com`（Phase 3） |
+
+### 16.4 单元测试覆盖点
+
+#### `test_models.py` — 数据模型
+- FetchConfig 13 个字段默认值验证
+- FetchConfig 自定义覆盖（部分字段改，其余保持默认）
+- FetchResult 最小构造、`to_dict()` 往返、字段完整性
+
+#### `test_extractors.py` — 内容提取
+- `clean_text`: 空格剥离、CRLF 规范化、空行折叠、空字符串
+- `extract_main_text`: 正常 HTML、微型 HTML、空 HTML、script/style 剥离、返回元组结构
+- `merge_discovered_content`: 空列表不追加、追加格式正确、输出已清理
+
+#### `test_quality.py` — 质量评估
+- `contains_spa_signals`: 7 种 SPA 信号逐一检测 + 普通 HTML 无误报 + 组合 SPA HTML
+- `is_low_quality_text`: 空文本 / 纯空格 / 好文章 / nav 关键词密集 / 无标点长文 / 短行过多 / 少量短行不误判 / 混合内容
+- `should_escalate_to_browser`: 6 种 HTTP 状态码 / 正常 200 不升级 / HTML 过小 / SPA 信号 / 文本过短 / 低质量 / 优先级顺序 / None 状态码
+
+#### `test_browser.py` — 浏览器 Discovery
+- 无进展自动停止（stall_rounds）
+- 点击收集 items
+- 无点击目标时回退滚动
+- 点击数上限（max_clicks）
+- 滚动数上限（max_scrolls）
+- item 去重
+- Playwright 缺失时抛 RuntimeError
+
+#### `test_pipeline.py` — 主流程
+- URL 规范化：自动加 `https://`、去空格、保留 `http://`
+- HTTP 快路径：好 HTML 留在 http 层、HTTP 错误返回 error result、cfg=None 用默认配置
+- 浏览器升级：SPA 触发 fallback、fallback 失败回退 HTTP 结果、PDF 跳过浏览器
+- 强制浏览器：跳过 HTTP、失败处理
+- Discovery 模式：跳过 HTTP、content 含 `[Discovery Items]`、无 items 时不追加
+- 字段一致性：成功和错误结果都包含全部 12 个字段
+
+### 16.5 集成测试覆盖点
+
+#### `TestPlainHtml` — httpbin.org/html
+- snapshot 成功、内容含 Melville 文本、force_browser 也能工作
+
+#### `TestJavascriptSpa` — ip.sb
+- snapshot 自动升级到 browser（`needs_browser_reason` 非空）
+- browser 拿到 IP 相关信息（IPv4/ISP/country 等关键词）
+
+#### `TestDiscoveryPagination` — airank.dev
+- snapshot 获取首屏内容
+- discovery 模式发现更多 models（`discovered_items >= 1`）
+- discovery_actions 包含 click 动作
+
+#### `TestXComAdapter` — x.com/elonmusk（Phase 3 基线）
+- snapshot 基线记录（不 assert ok，仅验证结构有效）
+- force_browser 基线记录
+
+### 16.6 修复记录
+
+| 发现的问题 | 修复 | 文件 |
+|-----------|------|------|
+| `extract_main_text("")` 抛 `lxml.ParserError: Document is empty` | `_extract_with_readability` 增加 `try/except`，空 HTML 返回 `("", None, "readability")` | `extractors.py` |
+| 测试 fixture `GOOD_HTML` 不足 8KB，触发 `html_too_small` 升级 | 重复段落使 HTML 体积 > 8KB，并加 `assert` 防回归 | `conftest.py` |
+| mock page 的 `page.locator()` 返回 coroutine 导致 `.inner_text()` 失败 | `page.locator` 用 `MagicMock`（sync），`.inner_text` 用 `AsyncMock`（async） | `test_browser.py` |
