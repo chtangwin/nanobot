@@ -97,6 +97,7 @@ async def robust_fetch(
     """Main entry point: fetch URL with progressive escalation.
 
     Pipeline:
+      0. Check adapter registry — if a site-specific adapter matches, use it.
       1. If force_browser or discovery_mode → go straight to browser.
       2. Otherwise try HTTP fast path.
       3. Assess quality; if below threshold → escalate to browser.
@@ -107,6 +108,16 @@ async def robust_fetch(
     url = url.strip()
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
+
+    # --- Adapter routing ---
+    try:
+        from nanobot.webfetch.adapters.registry import create_default_registry
+        registry = create_default_registry()
+        adapter = registry.resolve(url)
+        if adapter.name != "generic":
+            return await adapter.fetch(url, cfg, discovery_mode=discovery_mode)
+    except Exception:
+        pass  # adapter layer is optional; fall through to generic pipeline
 
     # --- Direct browser path ---
     if force_browser or discovery_mode:
