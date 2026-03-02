@@ -407,12 +407,6 @@ def gateway(
         if not channel or not chat_id:
             return
 
-        for _ in range(20):
-            ch = channels.get_channel(channel)
-            if ch and ch.is_running:
-                break
-            await asyncio.sleep(0.5)
-
         from nanobot.bus.events import OutboundMessage
         await bus.publish_outbound(OutboundMessage(
             channel=channel,
