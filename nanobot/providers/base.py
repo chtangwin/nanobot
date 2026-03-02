@@ -87,8 +87,8 @@ class LLMProvider(ABC):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         model: str | None = None,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
         reasoning_effort: str | None = None,
     ) -> LLMResponse:
         """
@@ -98,8 +98,8 @@ class LLMProvider(ABC):
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions.
             model: Model identifier (provider-specific).
-            max_tokens: Maximum tokens in response.
-            temperature: Sampling temperature.
+            max_tokens: Maximum tokens in response. None = provider default.
+            temperature: Sampling temperature. None = provider default.
         
         Returns:
             LLMResponse with content and/or tool calls.
