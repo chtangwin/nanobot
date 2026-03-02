@@ -35,8 +35,8 @@ Actions:
 - list: List all configured hosts and their status
 - add: Add a new host (requires: name, ssh_host)
 - remove: Remove a host (requires: name)
-- connect: Establish or repair connection to a host. Only use when user explicitly asks to connect, or after exec reports connection failure. Do NOT call before every exec. (requires: name)
-- disconnect: ⚠️ TEARDOWN: kills remote_server, tmux session, and deletes /tmp/nanobot-* — use only when completely done (requires: name)
+- connect: Establish or repair connection. ONLY use when: (1) user explicitly asks to connect, or (2) exec reports connection failure. NEVER call on your own initiative. (requires: name)
+- disconnect: ⚠️ TEARDOWN — NEVER call unless user EXPLICITLY asks to disconnect. Kills remote_server, tmux, deletes session. Requires confirm=user's exact words. (requires: name, confirm)
 - status: Get status of a host (requires: name)
 - exec: Execute a command on a host. Auto-connects if needed, auto-heals on transport issues. Just call this directly. (requires: name, command)
 
@@ -81,8 +81,8 @@ Examples:
                     "description": "Command to execute (for exec)",
                 },
                 "confirm": {
-                    "type": "boolean",
-                    "description": "Set true ONLY when user explicitly asked to disconnect. Never set on your own.",
+                    "type": "string",
+                    "description": "For disconnect ONLY: copy the user's exact words requesting disconnect. Leave empty if user did not ask.",
                 },
                 "timeout": {
                     "type": "number",
@@ -111,8 +111,9 @@ Examples:
             if action == "connect":
                 return await self._connect_host(name=kwargs.get("name"))
             if action == "disconnect":
-                if not kwargs.get("confirm"):
-                    return "⚠️ This will TEARDOWN the remote session (kill remote_server, tmux, delete /tmp/nanobot-*). Ask the user to confirm before proceeding."
+                confirm_text = kwargs.get("confirm", "")
+                if not confirm_text or not isinstance(confirm_text, str) or len(confirm_text.strip()) < 3:
+                    return "⚠️ REFUSED: disconnect requires the user's exact words requesting disconnect in the 'confirm' field. Do NOT disconnect unless the user explicitly asked."
                 return await self._disconnect_host(name=kwargs.get("name"))
             if action == "status":
                 return await self._host_status(name=kwargs.get("name"))
