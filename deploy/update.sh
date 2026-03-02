@@ -1,42 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Update script for nanobot (systemd one-shot service)
-#
-# Expected flow:
-#   1) git pull latest code
-#   2) install/update dependencies with uv
-#   3) restart nanobot.service
+# Simple update script for nanobot (systemd one-shot service)
+# 1) pull origin/dev-combined
+# 2) sync deps (keep tts extra)
+# 3) restart user service
 
-PATH=${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin
-APP_DIR="${APP_DIR:-$HOME/nanobot}"
-UV_BIN="${UV_BIN:-uv}"
-SERVICE_NAME="${SERVICE_NAME:-nanobot.service}"
-SYSTEMCTL_CMD="${SYSTEMCTL_CMD:-systemctl}"
-SYSTEMCTL_SCOPE="${SYSTEMCTL_SCOPE:---user}"
-GIT_REMOTE="${GIT_REMOTE:-origin}"
-GIT_BRANCH="${GIT_BRANCH:-dev-combined}"
+PATH="${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
-cd "$APP_DIR"
+cd "$HOME/nanobot"
 
-echo "[update] app dir: $APP_DIR"
-echo "[update] fetching latest code from ${GIT_REMOTE}/${GIT_BRANCH} ..."
-git fetch "$GIT_REMOTE" "$GIT_BRANCH" --prune
+echo "[update] fetching origin/dev-combined ..."
+git fetch origin dev-combined --prune
 
-echo "[update] checking out ${GIT_BRANCH} ..."
-git checkout "$GIT_BRANCH"
+echo "[update] checking out dev-combined ..."
+git checkout dev-combined
 
-echo "[update] pulling latest commit (ff-only) from ${GIT_REMOTE}/${GIT_BRANCH} ..."
-git pull --ff-only "$GIT_REMOTE" "$GIT_BRANCH"
+echo "[update] pulling latest commit (ff-only) ..."
+git pull --ff-only origin dev-combined
 
-echo "[update] syncing dependencies: $UV_BIN sync --extra tts"
-"$UV_BIN" sync --extra tts
+echo "[update] syncing dependencies ..."
+uv sync --extra tts
 
-echo "[update] restarting $SERVICE_NAME ..."
-if [[ -n "$SYSTEMCTL_SCOPE" ]]; then
-  "$SYSTEMCTL_CMD" "$SYSTEMCTL_SCOPE" restart "$SERVICE_NAME"
-else
-  "$SYSTEMCTL_CMD" restart "$SERVICE_NAME"
-fi
+echo "[update] restarting nanobot.service ..."
+systemctl --user restart nanobot.service
 
 echo "[update] done"
