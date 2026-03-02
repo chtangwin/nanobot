@@ -393,6 +393,25 @@ class AgentLoop:
         err = ((result.get("error") or "").strip() or "Command failed")
         return False, err[:1200]
 
+    def _restart_notify_path(self) -> Path:
+        return self.workspace / "sessions" / "_runtime" / "restart-notify.json"
+
+    def _save_restart_notify_target(self, msg: InboundMessage) -> None:
+        """Persist restart notification target for post-restart delivery."""
+        path = self._restart_notify_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "channel": msg.channel,
+            "chat_id": msg.chat_id,
+            "requested_by": str(msg.sender_id),
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    def _clear_restart_notify_target(self) -> None:
+        path = self._restart_notify_path()
+        if path.exists():
+            path.unlink()
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -457,7 +476,13 @@ class AgentLoop:
                     ),
                 )
 
+            if action == "restart":
+                self._save_restart_notify_target(msg)
+
             ok, output = await self._run_self_update_command(action)
+            if not ok and action == "restart":
+                self._clear_restart_notify_target()
+
             if ok:
                 return OutboundMessage(
                     channel=msg.channel,

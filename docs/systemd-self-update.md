@@ -79,6 +79,9 @@ journalctl -f _SYSTEMD_USER_UNIT=nanobot.service
 - `/admin status`
 - `/admin restart`
 
+> `/admin restart` 会在执行前记录当前聊天目标。服务重启完成后，nanobot 会向同一会话发送一次
+> `✅ nanobot restarted and online.` 回执，并自动删除该临时记录文件。
+
 ### B. 本机手动触发
 
 ```bash
@@ -116,3 +119,4 @@ journalctl -f _SYSTEMD_USER_UNIT=nanobot-update.service
 
 - 更新流程由 `deploy/update.sh` 执行：`git pull --ff-only origin dev-combined` + `uv sync --extra tts` + `systemctl --user restart nanobot.service`。
 - `nanobot.service` 使用 SIGTERM 停止，nanobot 会走清理流程（MCP/channels/cron/heartbeat）。
+- `/admin restart` 的临时回执文件路径：`~/.nanobot/workspace/sessions/_runtime/restart-notify.json`（启动后成功读取即删除）。

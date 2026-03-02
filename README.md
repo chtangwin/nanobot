@@ -888,6 +888,9 @@ Admin chat commands:
 - `/admin restart` — restart gateway service
 - `/admin status` — check service status
 
+When `/admin restart` is issued from chat, nanobot stores that chat target and sends a one-time
+"✅ nanobot restarted and online." confirmation after startup.
+
 > Security notes:
 >
 > - Always keep `allowFrom` minimal.

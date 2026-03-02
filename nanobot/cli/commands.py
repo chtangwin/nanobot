@@ -1,6 +1,7 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import json
 import os
 import signal
 from pathlib import Path
@@ -385,14 +386,48 @@ def gateway(
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _exit_on_signal)
 
+    def _restart_notify_path() -> Path:
+        return config.workspace_path / "sessions" / "_runtime" / "restart-notify.json"
+
+    async def _deliver_pending_restart_notice() -> None:
+        path = _restart_notify_path()
+        if not path.exists():
+            return
+
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            path.unlink(missing_ok=True)
+            return
+
+        path.unlink(missing_ok=True)
+
+        channel = str(payload.get("channel") or "").strip()
+        chat_id = str(payload.get("chat_id") or "").strip()
+        if not channel or not chat_id:
+            return
+
+        for _ in range(20):
+            ch = channels.get_channel(channel)
+            if ch and ch.is_running:
+                break
+            await asyncio.sleep(0.5)
+
+        from nanobot.bus.events import OutboundMessage
+        await bus.publish_outbound(OutboundMessage(
+            channel=channel,
+            chat_id=chat_id,
+            content="✅ nanobot restarted and online.",
+        ))
+
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
-                agent.run(),
-                channels.start_all(),
-            )
+            agent_task = asyncio.create_task(agent.run())
+            channels_task = asyncio.create_task(channels.start_all())
+            await _deliver_pending_restart_notice()
+            await asyncio.gather(agent_task, channels_task)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
