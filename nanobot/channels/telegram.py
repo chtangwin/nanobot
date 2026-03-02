@@ -112,6 +112,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
+        BotCommand("admin", "Admin operations (update/restart/status)"),
         BotCommand("tts", "Toggle voice reply (on/off/auto)"),
         BotCommand("help", "Show available commands"),
     ]
@@ -154,6 +155,8 @@ class TelegramChannel(BaseChannel):
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
+        self._app.add_handler(CommandHandler("stop", self._forward_command))
+        self._app.add_handler(CommandHandler("admin", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
         self._app.add_handler(CommandHandler("tts", self._on_tts))
         
@@ -388,6 +391,7 @@ class TelegramChannel(BaseChannel):
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/stop — Stop the current task\n"
+            "/admin update|restart|status — Admin self-update operations\n"
             "/tts — Voice reply (on/off/auto)\n"
             "/help — Show available commands"
         )
