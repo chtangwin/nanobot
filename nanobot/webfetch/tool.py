@@ -37,9 +37,13 @@ class WebFetchTool(Tool):
 
     name = "web_fetch"
     description = (
-        "Fetch URL and extract readable content. "
-        "Automatically upgrades to browser for JS/SPA pages. "
-        "Use mode='discovery' to expand paginated content (click load-more/next)."
+        "Fetch a URL and extract readable text content. "
+        "Works for static HTML, JS/SPA pages (auto-upgrades to browser when needed), "
+        "and paginated lists. Returns JSON with text, metadata, and extraction details.\n"
+        "• Default (snapshot): fast HTTP fetch, auto-escalates to browser if page is JS-rendered.\n"
+        "• mode='discovery': for pages with 'Load More'/'Next' buttons or infinite scroll — "
+        "automatically clicks through pagination to collect all items.\n"
+        "• forceBrowser=true: skip HTTP and use browser directly (useful for known JS-heavy sites)."
     )
     parameters = {
         "type": "object",
@@ -48,13 +52,26 @@ class WebFetchTool(Tool):
             "mode": {
                 "type": "string",
                 "enum": ["snapshot", "discovery"],
-                "description": "snapshot (default): single page; discovery: expand pagination/load-more",
+                "description": (
+                    "snapshot (default): fetch single page, auto-upgrades to browser for JS/SPA. "
+                    "discovery: expand paginated/lazy-loaded content by clicking 'Load More', "
+                    "'Next', 'See More' buttons and scrolling. Use when you need ALL items "
+                    "from a list/table that spans multiple pages."
+                ),
             },
             "forceBrowser": {
                 "type": "boolean",
-                "description": "Skip HTTP fast path and use browser directly",
+                "description": (
+                    "If true, skip HTTP and go straight to browser rendering. "
+                    "Useful for sites you know require JavaScript (e.g. SPAs, dashboards). "
+                    "Default: false (tries fast HTTP first, upgrades only if needed)."
+                ),
             },
-            "maxChars": {"type": "integer", "minimum": 100, "description": "Max output characters"},
+            "maxChars": {
+                "type": "integer",
+                "minimum": 100,
+                "description": "Maximum characters to return (default: 50000). Content is truncated if longer.",
+            },
         },
         "required": ["url"],
     }
