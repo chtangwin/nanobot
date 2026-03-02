@@ -418,10 +418,11 @@ def gateway(
         try:
             await cron.start()
             await heartbeat.start()
-            agent_task = asyncio.create_task(agent.run())
-            channels_task = asyncio.create_task(channels.start_all())
             await _deliver_pending_restart_notice()
-            await asyncio.gather(agent_task, channels_task)
+            await asyncio.gather(
+                agent.run(),
+                channels.start_all(),
+            )
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
