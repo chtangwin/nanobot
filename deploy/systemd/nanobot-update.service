@@ -1,20 +1,19 @@
 [Unit]
-Description=nanobot self-upgrade task
+Description=nanobot self-update task
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=root
-Group=root
-WorkingDirectory=/opt/nanobot
-Environment=APP_DIR=/opt/nanobot
+WorkingDirectory=%h/nanobot
+Environment=APP_DIR=%h/nanobot
 Environment=SERVICE_NAME=nanobot.service
-ExecStart=/bin/bash /opt/nanobot/deploy/upgrade.sh
+Environment=SYSTEMCTL_CMD=systemctl --user
+ExecStart=/bin/bash %h/nanobot/deploy/update.sh
 
 # Security hardening (optional, relax if your environment needs it)
 PrivateTmp=true
 NoNewPrivileges=true
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

@@ -451,7 +451,7 @@ class AgentLoop:
                     chat_id=msg.chat_id,
                     content=(
                         "Admin commands:\n"
-                        "/admin update — start upgrade workflow\n"
+                        "/admin update — start update workflow\n"
                         "/admin restart — restart nanobot service\n"
                         "/admin status — check nanobot service status"
                     ),

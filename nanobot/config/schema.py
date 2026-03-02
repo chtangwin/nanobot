@@ -278,9 +278,9 @@ class SelfUpdateConfig(Base):
 
     enabled: bool = False
     allow_from: list[str] = Field(default_factory=list)
-    update_command: str = "systemctl start nanobot-upgrade.service"
-    restart_command: str = "systemctl restart nanobot.service"
-    status_command: str = "systemctl status nanobot --no-pager -n 20"
+    update_command: str = "systemctl --user start nanobot-update.service"
+    restart_command: str = "systemctl --user restart nanobot.service"
+    status_command: str = "systemctl --user status nanobot --no-pager -n 20"
     timeout: int = 120
 
 

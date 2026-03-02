@@ -873,9 +873,9 @@ Enable and scope it to explicit admin senders:
     "selfUpdate": {
       "enabled": true,
       "allowFrom": ["123456789"],
-      "updateCommand": "systemctl start nanobot-upgrade.service",
-      "restartCommand": "systemctl restart nanobot.service",
-      "statusCommand": "systemctl status nanobot --no-pager -n 20",
+      "updateCommand": "systemctl --user start nanobot-update.service",
+      "restartCommand": "systemctl --user restart nanobot.service",
+      "statusCommand": "systemctl --user status nanobot --no-pager -n 20",
       "timeout": 120
     }
   }
@@ -884,7 +884,7 @@ Enable and scope it to explicit admin senders:
 
 Admin chat commands:
 
-- `/admin update` — trigger one-shot upgrade workflow
+- `/admin update` — trigger one-shot update workflow
 - `/admin restart` — restart gateway service
 - `/admin status` — check service status
 
@@ -1107,20 +1107,22 @@ If you edit the `.service` file itself, run `systemctl --user daemon-reload` bef
 > loginctl enable-linger $USER
 > ```
 
-### Production-style system service + one-shot upgrade
+### Production-style user service + one-shot update
 
-This repo also includes templates under `deploy/systemd/`:
+This repo also includes templates under `deploy/systemd/` (for user-level systemd):
 
 - `deploy/systemd/nanobot.service` — long-running gateway service
-- `deploy/systemd/nanobot-upgrade.service` — one-shot upgrade task
-- `deploy/upgrade.sh` — upgrade script (`git pull --ff-only` + `uv sync` + service restart)
+- `deploy/systemd/nanobot-update.service` — one-shot update task
+- `deploy/update.sh` — update script (`git pull --ff-only` + `uv sync` + service restart)
+
+Path convention in templates: `%h/nanobot` (equivalent to `$HOME/nanobot`).
 
 Recommended workflow:
 
 1. `nanobot.service` runs the gateway (`Restart=always`, SIGTERM-based shutdown).
 2. Admin sends `/admin update` in chat.
-3. nanobot executes `systemctl start nanobot-upgrade.service`.
-4. one-shot service runs `deploy/upgrade.sh` and restarts `nanobot.service`.
+3. nanobot executes `systemctl --user start nanobot-update.service`.
+4. one-shot service runs `deploy/update.sh` and restarts `nanobot.service`.
 
 This gives controlled self-update with clean process restart and resource cleanup.
 
