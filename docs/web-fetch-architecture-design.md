@@ -331,8 +331,8 @@ Tool 层保留：
 
 设计文档的 4 个 Phase 划分合理，建议细化：
 
-- **Phase 1**（抽离 core）：创建 `nanobot/webfetch/` 包，拆分 models / extractors / quality / pipeline / browser，保留 `scripts/web_fetch_robust.py` 作为 thin wrapper 调用新 core。 ✅ 已完成
-- **Phase 2**（接入 Tool）：修改 `WebFetchTool.execute()` 调用 `core.pipeline`，扩展入参和出参，保持默认行为兼容。
+- **Phase 1**（抽离 core） ✅ 已完成
+- **Phase 2**（接入 Tool） ✅ 已完成
 - **Phase 3**（Adapter）：实现 `adapters/base.py` 接口 + `generic.py` + `x_com.py` + `registry.py`。
 - **Phase 4**（Benchmark）：固定三组基准 URL，自动化对比。
 
@@ -353,13 +353,14 @@ tests/webfetch/
 ├── test_quality.py          # 20 tests — SPA 检测 / 低质量判定 / 升级逻辑
 ├── test_browser.py          # 7 tests  — discovery 循环 (stall/click/scroll/max/dedup)
 ├── test_pipeline.py         # 19 tests — URL 规范化 / HTTP / 升级 / force / discovery / 字段
-└── test_integration.py      # 10 tests — 4 个基准 URL 的真实网络测试 (@integration)
+├── test_tool.py             # 19 tests — WebFetchTool schema / 兼容性 / 新参数 / 错误处理
+└── test_integration.py      # 9 tests  — 4 个基准 URL 的真实网络测试 (@integration)
 ```
 
 ### 16.2 运行方式
 
 ```bash
-# 单元测试 (73 tests, ~1.5s, 无需网络)
+# 单元测试 (92 tests, ~2s, 无需网络)
 uv run pytest tests/webfetch/ -m "not integration" -v
 
 # 集成测试 (需网络 + chromium)
@@ -425,8 +426,12 @@ uv run pytest tests/webfetch/ -v
 
 #### `TestDiscoveryPagination` — airank.dev
 - snapshot 获取首屏内容
-- discovery 模式发现更多 models（`discovered_items >= 1`）
-- discovery_actions 包含 click 动作
+- 完整 discovery 工作流验证（单次 fetch，多维度断言）：
+  - "See More" 作为首个 click action
+  - "Next" 点击 ≥8 次（全部 10 页翻完）
+  - 全部 97 个模型（#1 ~ #97）出现在 content 中
+  - 末尾标志 "Showing 91 to 97 of 97" 存在
+  - discovered_items ≥ 50
 
 #### `TestXComAdapter` — x.com/elonmusk（Phase 3 基线）
 - snapshot 基线记录（不 assert ok，仅验证结构有效）
@@ -439,3 +444,117 @@ uv run pytest tests/webfetch/ -v
 | `extract_main_text("")` 抛 `lxml.ParserError: Document is empty` | `_extract_with_readability` 增加 `try/except`，空 HTML 返回 `("", None, "readability")` | `extractors.py` |
 | 测试 fixture `GOOD_HTML` 不足 8KB，触发 `html_too_small` 升级 | 重复段落使 HTML 体积 > 8KB，并加 `assert` 防回归 | `conftest.py` |
 | mock page 的 `page.locator()` 返回 coroutine 导致 `.inner_text()` 失败 | `page.locator` 用 `MagicMock`（sync），`.inner_text` 用 `AsyncMock`（async） | `test_browser.py` |
+
+---
+
+## 17. Phase 2 实施记录
+
+> 完成日期：2026-03-02 · 分支：`feature/webfetch`
+
+### 17.1 新 WebFetchTool（`nanobot/webfetch/tool.py`）
+
+替换 `agent/tools/web.py` 中的旧 `WebFetchTool`，调用 core pipeline。
+
+**接口变化：**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `url` | string | *必填* | 目标 URL |
+| `mode` | `"snapshot"` \| `"discovery"` | `"snapshot"` | snapshot: 单页；discovery: 自动翻页 |
+| `forceBrowser` | boolean | `false` | 跳过 HTTP，直接用浏览器 |
+| `maxChars` | integer (≥100) | 50000 | 最大返回字符数 |
+
+- 旧参数 `extractMode` 仍可传入（被忽略），不会报错。
+- 响应 JSON 是旧字段的超集：保留 `url`, `text`, `extractor`, `truncated`, `length`，新增 `ok`, `source_tier`, `final_url`, `needs_browser_reason`, `discovery_actions`, `discovered_items`, `error`。
+
+### 17.2 注册方式（最小改动）
+
+仅修改 2 个文件，各 1 行改动：
+
+```python
+# nanobot/agent/loop.py (line ~150)
+from nanobot.webfetch.tool import WebFetchTool  # lazy import inside method
+
+# nanobot/agent/subagent.py (line ~119)
+from nanobot.webfetch.tool import WebFetchTool  # lazy import inside method
+```
+
+使用 lazy import 避免循环依赖（`webfetch.tool` → `agent.tools.base` → `agent.__init__` → `loop` → `webfetch.tool`）。
+
+### 17.3 LLM 可发现性
+
+Tool description 和参数描述已增强，LLM 能看到：
+- 三种使用模式的说明（snapshot / discovery / forceBrowser）
+- 何时使用 discovery（分页列表、Load More、Next 按钮）
+- 何时使用 forceBrowser（已知 JS 站点、SPA、仪表盘）
+- maxChars 默认值
+
+### 17.4 依赖变更
+
+`playwright` 和 `trafilatura` 从核心依赖移至可选 `[web]` extra：
+
+```toml
+[project.optional-dependencies]
+web = ["playwright>=1.58.0", "trafilatura>=2.0.0"]
+```
+
+安装方式：`pip install nanobot-ai[web]` 或 `uv sync --extra web`。
+
+### 17.5 测试覆盖
+
+新增 `test_tool.py`（19 tests）：
+- Schema 验证：name、required、enum、to_schema 格式
+- 向后兼容：url-only 调用、legacy extractMode、旧+新响应字段
+- 新参数：mode=discovery、forceBrowser、maxChars 截断
+- URL 验证：无效 scheme、裸域名
+- 错误处理：pipeline 错误透传、unexpected exception 兜底
+
+**当前测试总计：92 passed（单元，~2s） + 9 集成（需网络）**
+
+### 17.6 回退方案
+
+旧 `WebFetchTool` 保留在 `agent/tools/web.py` 未删除。回退只需改回 import：
+
+```python
+# 回退: 改回旧 import
+from nanobot.agent.tools.web import WebFetchTool
+```
+
+---
+
+## 18. Phase 3 任务清单（Adapter 层）
+
+### 18.1 目标
+
+在 pipeline 中引入站点适配器机制，使难站点（如 x.com）走专用逻辑，通用站点继续走现有 generic 路径。
+
+### 18.2 待实现文件
+
+```text
+nanobot/webfetch/adapters/
+├── __init__.py          # ✅ 已创建（空骨架）
+├── base.py              # Adapter 抽象接口
+├── generic.py           # 通用适配器（包装现有 pipeline 逻辑）
+├── x_com.py             # X/Twitter 专用适配器
+└── registry.py          # URL → adapter 路由（域名匹配）
+```
+
+### 18.3 具体任务
+
+| # | 任务 | 说明 |
+|---|------|------|
+| 1 | **定义 `Adapter` 抽象基类** (`base.py`) | 接口：`async def fetch(url, cfg) -> FetchResult`；属性：`domains: list[str]`（匹配的域名） |
+| 2 | **实现 `GenericAdapter`** (`generic.py`) | 包装 `core/pipeline.py` 的 `robust_fetch`，作为默认 fallback |
+| 3 | **实现 `XComAdapter`** (`x_com.py`) | 桥接现有 `x-scraper` skill 逻辑；持久登录态（`x_auth.json`）；按推文 URL 去重；输出结构化字段 |
+| 4 | **实现 `AdapterRegistry`** (`registry.py`) | URL → adapter 选择；域名前缀匹配；未匹配时回退 generic；`register()` / `resolve(url)` API |
+| 5 | **pipeline 集成** | `robust_fetch()` 开头调用 `registry.resolve(url)`；如果返回非 generic adapter → 走 adapter 路径 |
+| 6 | **FetchResult.source_tier** | adapter 路径返回 `"adapter:x_com"` 等值 |
+| 7 | **测试** | `test_adapters.py`：base 接口、registry 路由、generic 透传、x_com mock/集成 |
+| 8 | **集成测试更新** | `test_integration.py` 的 `TestXComAdapter` 从 baseline 升级为真实验证 |
+
+### 18.4 设计要点
+
+- **Adapter 接口最小化**：只需 `fetch()` + `domains`，不过度抽象
+- **Registry 简单路由**：域名匹配即可（`x.com` / `twitter.com` → `XComAdapter`）
+- **x_com adapter 可分阶段**：先桥接现有 x-scraper，后续再内化
+- **不改 tool 层**：adapter 对 `WebFetchTool` 透明，只在 pipeline 内部路由
