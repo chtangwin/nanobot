@@ -1096,7 +1096,9 @@ systemctl --user enable --now nanobot-gateway
 ```bash
 systemctl --user status nanobot-gateway        # check status
 systemctl --user restart nanobot-gateway       # restart after config changes
-journalctl --user -u nanobot-gateway -f        # follow logs
+journalctl --user -u nanobot-gateway -f        # follow logs (most setups)
+# if --user -u shows no entries, use field filter:
+journalctl -f _SYSTEMD_USER_UNIT=nanobot-gateway.service
 ```
 
 If you edit the `.service` file itself, run `systemctl --user daemon-reload` before restarting.

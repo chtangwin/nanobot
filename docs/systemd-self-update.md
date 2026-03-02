@@ -46,6 +46,8 @@ systemctl --user status nanobot.service --no-pager -n 50
 
 ```bash
 journalctl --user -u nanobot.service -f
+# 若显示 "No journal files were found"，改用字段过滤：
+journalctl -f _SYSTEMD_USER_UNIT=nanobot.service
 ```
 
 ## 5) 配置 selfUpdate（`~/.nanobot/config.json`）
@@ -88,6 +90,8 @@ systemctl --user status nanobot-update.service --no-pager -n 100
 
 ```bash
 journalctl --user -u nanobot-update.service -f
+# 若无输出，改用字段过滤：
+journalctl -f _SYSTEMD_USER_UNIT=nanobot-update.service
 ```
 
 ## 7) 常用运维命令
@@ -101,9 +105,11 @@ systemctl --user restart nanobot.service
 
 # 跟踪主服务日志
 journalctl --user -u nanobot.service -f
+journalctl -f _SYSTEMD_USER_UNIT=nanobot.service
 
 # 跟踪更新任务日志
 journalctl --user -u nanobot-update.service -f
+journalctl -f _SYSTEMD_USER_UNIT=nanobot-update.service
 ```
 
 ## 备注
