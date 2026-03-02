@@ -7,6 +7,8 @@ Skip with: uv run pytest -m "not integration"
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from nanobot.webfetch.core.models import FetchConfig, FetchResult
@@ -103,7 +105,15 @@ class TestJavascriptSpa:
 # ---------------------------------------------------------------------------
 
 class TestDiscoveryPagination:
-    """https://airank.dev — SPA with 'See More' + paginated 'Next'."""
+    """https://airank.dev — SPA with 'See More' + paginated 'Next'.
+
+    Full workflow:
+      1. Click "See More (93 more models)" to expand the list
+      2. Click "Next" repeatedly to paginate through all 10 pages
+      3. Collect all 97 models (#1 through #97)
+
+    Uses a module-scoped fixture to fetch once and validate many aspects.
+    """
 
     URL = BENCHMARKS["discovery_pagination"]["url"]
 
@@ -113,7 +123,17 @@ class TestDiscoveryPagination:
         _assert_result_valid(r)
         assert len(r.content) > 100
 
-    async def test_discovery_finds_more_models(self):
+    async def test_full_discovery_workflow(self):
+        """Single fetch, comprehensive validation of the complete discovery pipeline.
+
+        Validates:
+          - Result structure and ok status
+          - "See More" click occurred as first action
+          - "Next" clicked >=8 times (9 pages after first)
+          - All 97 models (#1 to #97) present in content
+          - Last page marker "Showing 91 to 97 of 97" present
+          - discovered_items >= 50
+        """
         cfg = FetchConfig(
             browser_timeout_s=30.0,
             browser_post_wait_ms=2000,
@@ -122,25 +142,47 @@ class TestDiscoveryPagination:
             discovery_wait_ms=1500,
         )
         r = await robust_fetch(self.URL, cfg, discovery_mode=True)
+
+        # --- Basic structure ---
         _assert_result_valid(r)
+        assert r.ok is True
         assert r.source_tier == "browser"
         assert r.needs_browser_reason == "discovery_mode"
-        # Should have clicked at least once
-        assert len(r.discovery_actions) >= 1
-        # Should have discovered items
-        assert r.discovered_items >= 1
 
-    async def test_discovery_actions_contain_click(self):
-        cfg = FetchConfig(
-            browser_timeout_s=30.0,
-            browser_post_wait_ms=2000,
-            discovery_max_steps=5,
-            discovery_wait_ms=1500,
+        # --- Action sequence: See More first, then Next ×N ---
+        actions = r.discovery_actions
+        assert len(actions) >= 2, f"Expected multiple actions, got {actions}"
+
+        first_click = next((a for a in actions if a.startswith("click:")), None)
+        assert first_click is not None and "See More" in first_click, (
+            f"First click should be 'See More', got: {first_click}"
         )
-        r = await robust_fetch(self.URL, cfg, discovery_mode=True)
-        click_actions = [a for a in r.discovery_actions if a.startswith("click:")]
-        # Expect at least one click (See More or Next)
-        assert len(click_actions) >= 1 or len(r.discovery_actions) >= 1
+
+        next_clicks = [a for a in actions if a.lower().startswith("click:next")]
+        assert len(next_clicks) >= 8, (
+            f"Expected >=8 'Next' clicks for full pagination, got {len(next_clicks)}: {actions}"
+        )
+
+        # --- All 97 models present ---
+        model_numbers = sorted(set(
+            int(m) for m in re.findall(r"#(\d+)\s", r.content)
+        ))
+        assert len(model_numbers) >= 95, (
+            f"Expected >=95 unique model numbers, got {len(model_numbers)}: "
+            f"range #{model_numbers[0]}-#{model_numbers[-1]}"
+        )
+        assert model_numbers[0] == 1, f"First model should be #1, got #{model_numbers[0]}"
+        assert model_numbers[-1] == 97, f"Last model should be #97, got #{model_numbers[-1]}"
+
+        # --- Last page marker ---
+        assert "Showing 91 to 97 of 97" in r.content, (
+            "Last page marker 'Showing 91 to 97 of 97' not found in content"
+        )
+
+        # --- Discovery item count ---
+        assert r.discovered_items >= 50, (
+            f"Expected >=50 discovered items, got {r.discovered_items}"
+        )
 
 
 # ---------------------------------------------------------------------------
