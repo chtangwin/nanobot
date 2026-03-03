@@ -228,17 +228,32 @@ class TelegramChannel(BaseChannel):
         provider = (cfg.provider or "groq") if cfg else "groq"
 
         try:
+            model = ""
             if provider == "deepgram":
                 from nanobot.providers.deepgram_transcription import DeepgramTranscriptionProvider
                 model = (cfg.model if cfg and cfg.model else "nova-3")
+                language = (cfg.language if cfg and getattr(cfg, "language", "") else "")
                 transcriber = DeepgramTranscriptionProvider(
-                    api_key=cfg.api_key if cfg else None, model=model
+                    api_key=cfg.api_key if cfg else None,
+                    model=model,
+                    language=language,
                 )
             else:
                 from nanobot.providers.transcription import GroqTranscriptionProvider
+                model = cfg.model if cfg and cfg.model else "(provider-default)"
                 transcriber = GroqTranscriptionProvider(api_key=cfg.api_key if cfg else None)
 
-            return await transcriber.transcribe(file_path, mime_type=mime_type)
+            text = await transcriber.transcribe(file_path, mime_type=mime_type)
+            if not text:
+                logger.warning(
+                    "Transcription returned empty text (provider={}, model={}, media_type={}, mime_type={}, file={})",
+                    provider,
+                    model,
+                    media_type,
+                    mime_type or "",
+                    file_path,
+                )
+            return text
 
         except Exception as e:
             logger.error("Transcription failed: {}", e)
@@ -417,7 +432,12 @@ class TelegramChannel(BaseChannel):
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])
                         content_parts.append(f"[transcription: {transcription}]")
                     else:
+                        provider = (self.transcription_config.provider if self.transcription_config else "groq")
+                        language = (self.transcription_config.language if self.transcription_config else "")
                         content_parts.append(f"[{media_type}: {file_path}]")
+                        content_parts.append(
+                            f"[transcription-empty: provider={provider}, language={language or '-'}]"
+                        )
                 else:
                     content_parts.append(f"[{media_type}: {file_path}]")
                     

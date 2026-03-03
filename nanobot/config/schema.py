@@ -317,6 +317,7 @@ class TranscriptionConfig(Base):
     provider: str = "groq"  # "groq" or "deepgram"
     api_key: str = ""  # API key for the selected provider
     model: str = ""  # STT model (default: whisper-large-v3 for groq, nova-3 for deepgram)
+    language: str = ""  # Optional language hint, e.g. "zh" or "zh-CN" for Deepgram
 
 
 class ToolsConfig(Base):
