@@ -45,6 +45,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+web = [
+    "playwright>=1.58.0",
+    "trafilatura>=2.0.0",
+]
 tts = [
     "edge-tts>=7.2.7",
 ]
@@ -103,3 +107,7 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: hits real URLs (needs network + browser)",
+    "slow: takes >5s to run",
+]
