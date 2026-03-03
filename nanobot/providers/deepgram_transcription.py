@@ -72,6 +72,16 @@ class DeepgramTranscriptionProvider:
 
                 if transcript:
                     logger.info("Deepgram transcription: {}...", transcript[:50])
+                else:
+                    request_id = result.get("metadata", {}).get("request_id", "")
+                    duration = result.get("metadata", {}).get("duration", "")
+                    logger.warning(
+                        "Deepgram returned empty transcript (model={}, mime={}, request_id={}, duration={})",
+                        self.model,
+                        content_type,
+                        request_id,
+                        duration,
+                    )
                 return transcript
 
         except httpx.HTTPStatusError as e:

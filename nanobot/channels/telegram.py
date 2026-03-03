@@ -310,6 +310,7 @@ class TelegramChannel(BaseChannel):
         provider = (cfg.provider or "groq") if cfg else "groq"
 
         try:
+            model = ""
             if provider == "deepgram":
                 from nanobot.providers.deepgram_transcription import DeepgramTranscriptionProvider
                 model = (cfg.model if cfg and cfg.model else "nova-3")
@@ -318,9 +319,22 @@ class TelegramChannel(BaseChannel):
                 )
             else:
                 from nanobot.providers.transcription import GroqTranscriptionProvider
+                # Groq provider currently fixes model internally; avoid assuming
+                # exact model name here for logging stability.
+                model = cfg.model if cfg and cfg.model else "(provider-default)"
                 transcriber = GroqTranscriptionProvider(api_key=cfg.api_key if cfg else None)
 
-            return await transcriber.transcribe(file_path, mime_type=mime_type)
+            text = await transcriber.transcribe(file_path, mime_type=mime_type)
+            if not text:
+                logger.warning(
+                    "Transcription returned empty text (provider={}, model={}, media_type={}, mime_type={}, file={})",
+                    provider,
+                    model,
+                    media_type,
+                    mime_type or "",
+                    file_path,
+                )
+            return text
 
         except Exception as e:
             logger.error("Transcription failed: {}", e)
