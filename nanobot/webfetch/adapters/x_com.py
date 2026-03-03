@@ -17,14 +17,9 @@ from nanobot.webfetch.adapters.base import Adapter
 from nanobot.webfetch.core.extractors import clean_text
 from nanobot.webfetch.core.models import DEFAULT_HEADERS, FetchConfig, FetchResult
 
-# Auth file locations (first match wins):
-#   1. ~/.nanobot/auth/x_auth.json (user-generated, preferred)
-#   2. nanobot/webfetch/adapters/x_auth.json (built-in default)
-_ADAPTER_DIR = Path(__file__).parent
-_AUTH_SEARCH_PATHS = [
-    Path.home() / ".nanobot" / "auth" / "x_auth.json",
-    _ADAPTER_DIR / "x_auth.json",
-]
+# Auth file location (user space only)
+# Users must run: uv run python -m nanobot.webfetch.adapters.x_login
+_AUTH_PATH = Path.home() / ".nanobot" / "auth" / "x_auth.json"
 
 # Error message when auth is missing/invalid
 _AUTH_MISSING_MSG = """
@@ -38,7 +33,7 @@ To generate a working auth file:
 Or manually export cookies from Brave:
   1. Open Brave DevTools at x.com (logged in)
   2. Application > Cookies > https://x.com
-  3. Copy cookies and create the auth file
+  3. Copy cookies and create the auth file at ~/.nanobot/auth/x_auth.json
 """
 
 # JS: extract tweets from current viewport
@@ -92,11 +87,8 @@ _JS_EXTRACT_TWEETS = """() => {
 
 
 def _find_auth_file() -> Path | None:
-    """Find auth file. Returns path if exists, else None."""
-    for path in _AUTH_SEARCH_PATHS:
-        if path.exists():
-            return path
-    return None
+    """Return auth file path if it exists, else None."""
+    return _AUTH_PATH if _AUTH_PATH.exists() else None
 
 
 def _parse_x_url(url: str) -> tuple[str | None, str | None]:
