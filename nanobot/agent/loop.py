@@ -482,11 +482,13 @@ class AgentLoop:
                     ),
                 )
 
-            if action == "restart":
+            if action in {"update", "restart"}:
+                # Persist notify target for post-restart delivery. For update, the
+                # updater service may restart nanobot asynchronously.
                 self._save_restart_notify_target(msg)
 
             ok, output = await self._run_self_update_command(action)
-            if not ok and action == "restart":
+            if not ok and action in {"update", "restart"}:
                 self._clear_restart_notify_target()
 
             if ok:
