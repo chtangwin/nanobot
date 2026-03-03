@@ -29,7 +29,12 @@ BENCHMARKS = {
     },
     "adapter_x": {
         "url": "https://x.com/elonmusk",
-        "description": "X/Twitter profile. Needs adapter (Phase 3). Currently expected to fail or degrade.",
+        "description": "X/Twitter profile. Needs adapter (Phase 3).",
+        "expect_tier": "adapter:x_com",
+    },
+    "adapter_x_tau_rho_ai": {
+        "url": "https://x.com/tau_rho_ai",
+        "description": "X/Twitter profile (smaller account). Tests auth_token requirement.",
         "expect_tier": "adapter:x_com",
     },
 }
