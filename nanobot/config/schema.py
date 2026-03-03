@@ -342,11 +342,27 @@ class TTSConfig(Base):
     pitch: str = "+0Hz"
 
 
+class TodosConfig(Base):
+    """Todos tool configuration."""
+
+    enabled: bool = True
+    reminder_interval_s: int = 60
+    report_enabled: bool = True
+    report_tick_interval_s: int = 60
+    default_timezone: str = ""
+    default_daily_report_time: str = "21:00"
+    default_weekly_weekday: str = "sun"
+    default_weekly_report_time: str = "20:00"
+    use_scope_metadata: bool = False
+    default_alert_channels: list[str] = Field(default_factory=lambda: ["chat"])
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    todos: TodosConfig = Field(default_factory=TodosConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     tts: TTSConfig = Field(default_factory=TTSConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
