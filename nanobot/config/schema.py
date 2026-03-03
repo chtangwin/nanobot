@@ -346,9 +346,9 @@ class TodosConfig(Base):
     """Todos tool configuration."""
 
     enabled: bool = True
-    reminder_interval_s: int = 60
+    reminder_interval_s: int = 300
     report_enabled: bool = True
-    report_tick_interval_s: int = 60
+    report_tick_interval_s: int = 600
     default_timezone: str = ""
     default_daily_report_time: str = "21:00"
     default_weekly_weekday: str = "sun"
