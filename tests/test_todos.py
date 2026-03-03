@@ -103,6 +103,31 @@ class TestTodosTool:
         r4 = await tool.execute(action="report", period="daily")
         assert "Todos Daily Report" in r4
 
+    @pytest.mark.asyncio
+    async def test_tool_validation_errors(self, tmp_path):
+        cfg = SimpleNamespace(
+            default_timezone="Asia/Shanghai",
+            default_alert_channels=["chat"],
+            report_tick_interval_s=60,
+            default_daily_report_time="21:00",
+            default_weekly_weekday="sun",
+            default_weekly_report_time="20:00",
+        )
+        tool = TodosTool(workspace=tmp_path, config=cfg)
+        tool.set_context("telegram", "u1")
+
+        r1 = await tool.execute(action="query", due="before:2026-03")
+        assert r1.startswith("Error: due filter")
+
+        r2 = await tool.execute(action="report_subscribe", cadence="weekly", weekday="abc")
+        assert "weekday must be" in r2
+
+        r3 = await tool.execute(action="report_unsubscribe", subscription_id="x-1")
+        assert "subscription_id format" in r3
+
+        r4 = await tool.execute(action="bulk_done", ids=[1, -2])
+        assert "ids must be a list of positive integers" in r4
+
 
 class TestTodosReminderService:
     @pytest.mark.asyncio

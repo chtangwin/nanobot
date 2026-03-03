@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -9,6 +10,9 @@ from nanobot.agent.tools.base import Tool
 from nanobot.todos.report_service import TodosReportService
 from nanobot.todos.service import TodosService
 from nanobot.todos.store import TodosStore
+
+_SUBSCRIPTION_ID_RE = re.compile(r"^(daily|weekly)-\d+$")
+_WEEKDAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
 
 class TodosTool(Tool):
@@ -98,7 +102,7 @@ class TodosTool(Tool):
                 return self._query(**kwargs)
             if action == "done":
                 item_id = kwargs.get("id")
-                if not item_id:
+                if not isinstance(item_id, int) or item_id < 1:
                     return "Error: id is required for done"
                 done_item, repeated = self.service.done(self._channel, self._chat_id, item_id)
                 if repeated:
@@ -106,7 +110,7 @@ class TodosTool(Tool):
                 return f"Marked #{done_item.id} as done"
             if action == "undone":
                 item_id = kwargs.get("id")
-                if not item_id:
+                if not isinstance(item_id, int) or item_id < 1:
                     return "Error: id is required for undone"
                 item = self.service.undone(self._channel, self._chat_id, item_id)
                 return f"Marked #{item.id} as pending"
@@ -114,7 +118,7 @@ class TodosTool(Tool):
                 return self._edit(**kwargs)
             if action == "delete":
                 item_id = kwargs.get("id")
-                if not item_id:
+                if not isinstance(item_id, int) or item_id < 1:
                     return "Error: id is required for delete"
                 removed = self.service.delete(self._channel, self._chat_id, item_id)
                 return f"Deleted {removed} item(s)"
@@ -137,6 +141,8 @@ class TodosTool(Tool):
                 sid = kwargs.get("subscription_id")
                 if not sid:
                     return "Error: subscription_id is required"
+                if not _SUBSCRIPTION_ID_RE.match(str(sid)):
+                    return "Error: subscription_id format must be daily-N or weekly-N"
                 ok = self.report_service.remove_subscription(self._channel, self._chat_id, sid)
                 return f"Unsubscribed {sid}" if ok else f"Subscription {sid} not found"
             if action == "report_list":
@@ -169,12 +175,16 @@ class TodosTool(Tool):
         allowed_due = {"today", "tomorrow", "overdue"}
         if due and not (due in allowed_due or str(due).startswith("before:")):
             return "Error: due filter must be today|tomorrow|overdue|before:YYYY-MM-DD"
+        if isinstance(due, str) and due.startswith("before:"):
+            date_part = due.split(":", 1)[1]
+            if not self.service.validate_due(date_part) or len(date_part) != 10:
+                return "Error: due filter must be today|tomorrow|overdue|before:YYYY-MM-DD"
         items, _ = self.service.query(self._channel, self._chat_id, **kwargs)
         return self.service.format_query(items)
 
     def _edit(self, **kwargs: Any) -> str:
         item_id = kwargs.get("id")
-        if not item_id:
+        if not isinstance(item_id, int) or item_id < 1:
             return "Error: id is required for edit"
         fields = ("text", "due", "remind", "repeat", "priority", "tags", "category")
         if not any(kwargs.get(f) is not None for f in fields):
@@ -189,6 +199,9 @@ class TodosTool(Tool):
     def _bulk_done_or_delete(self, mode: str, **kwargs: Any) -> int:
         ids = kwargs.get("ids")
         category = kwargs.get("category")
+        if ids is not None:
+            if not isinstance(ids, list) or any((not isinstance(i, int) or i < 1) for i in ids):
+                raise ValueError("ids must be a list of positive integers")
         if not ids and not category:
             raise ValueError("ids or category is required")
         if mode == "done":
@@ -230,6 +243,8 @@ class TodosTool(Tool):
         weekday = kwargs.get("weekday")
         if cadence == "weekly" and not weekday:
             weekday = getattr(self.config, "default_weekly_weekday", "sun")
+        if cadence == "weekly" and weekday not in _WEEKDAYS:
+            return "Error: weekday must be mon|tue|wed|thu|fri|sat|sun"
 
         sub = self.report_service.add_subscription(
             self._channel,
