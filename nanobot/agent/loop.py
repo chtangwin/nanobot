@@ -32,7 +32,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, SelfUpdateConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, SelfUpdateConfig, TodosConfig
     from nanobot.cron.service import CronService
 
 
@@ -64,6 +64,7 @@ class AgentLoop:
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
+        todos_config: TodosConfig | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
@@ -85,6 +86,7 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.self_update_config = self_update_config or SelfUpdateConfig()
         self.cron_service = cron_service
+        self.todos_config = todos_config
         self.restrict_to_workspace = restrict_to_workspace
 
         self.context = ContextBuilder(workspace)
@@ -156,6 +158,9 @@ class AgentLoop:
         self.tools.register(CompareFileTool(self.backend_router))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        if self.todos_config and self.todos_config.enabled:
+            from nanobot.todos.tool import TodosTool
+            self.tools.register(TodosTool(workspace=self.workspace, config=self.todos_config))
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -181,7 +186,7 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "todos"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))

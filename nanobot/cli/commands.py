@@ -257,6 +257,8 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
+    from nanobot.todos.reminder_service import TodosReminderService
+    from nanobot.todos.report_service import TodosReportService
     
     if verbose:
         import logging
@@ -288,6 +290,7 @@ def gateway(
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
+        todos_config=config.tools.todos,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
@@ -367,7 +370,25 @@ def gateway(
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
     )
-    
+
+    async def _todos_notify(channel: str, chat_id: str, content: str) -> None:
+        from nanobot.bus.events import OutboundMessage
+        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=content))
+
+    todos_cfg = config.tools.todos
+    todos_reminder = TodosReminderService(
+        workspace=config.workspace_path,
+        interval_s=todos_cfg.reminder_interval_s,
+        on_notify=_todos_notify,
+        config=todos_cfg,
+    )
+    todos_report = TodosReportService(
+        workspace=config.workspace_path,
+        interval_s=todos_cfg.report_tick_interval_s,
+        on_notify=_todos_notify,
+        config=todos_cfg,
+    )
+
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
@@ -378,6 +399,10 @@ def gateway(
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
     
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+    if todos_cfg.enabled:
+        console.print(f"[green]✓[/green] Todos reminders: every {todos_cfg.reminder_interval_s}s")
+    if todos_cfg.enabled and todos_cfg.report_enabled:
+        console.print(f"[green]✓[/green] Todos reports: every {todos_cfg.report_tick_interval_s}s")
 
     def _exit_on_signal(_signum, _frame):
         raise KeyboardInterrupt
@@ -418,6 +443,10 @@ def gateway(
         try:
             await cron.start()
             await heartbeat.start()
+            if todos_cfg.enabled:
+                await todos_reminder.start()
+            if todos_cfg.enabled and todos_cfg.report_enabled:
+                await todos_report.start()
             await _deliver_pending_restart_notice()
             await asyncio.gather(
                 agent.run(),
@@ -427,6 +456,8 @@ def gateway(
             console.print("\nShutting down...")
         finally:
             await agent.close_mcp()
+            todos_report.stop()
+            todos_reminder.stop()
             heartbeat.stop()
             cron.stop()
             agent.stop()
@@ -484,6 +515,7 @@ def agent(
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
+        todos_config=config.tools.todos,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
@@ -976,6 +1008,7 @@ def cron_run(
         reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
+        todos_config=config.tools.todos,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
