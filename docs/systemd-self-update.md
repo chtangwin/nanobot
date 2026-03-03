@@ -13,7 +13,7 @@
 ```bash
 cd "$HOME/nanobot"
 git pull --ff-only
-uv sync --extra tts
+uv sync --extra tts --extra web
 ```
 
 ## 2) 安装 systemd 用户服务文件
@@ -117,6 +117,6 @@ journalctl -f _SYSTEMD_USER_UNIT=nanobot-update.service
 
 ## 备注
 
-- 更新流程由 `deploy/update.sh` 执行：`git pull --ff-only origin dev-combined` + `uv sync --extra tts` + `systemctl --user restart nanobot.service`。
+- 更新流程由 `deploy/update.sh` 执行：`git pull --ff-only origin dev-combined` + `uv sync --extra tts --extra web` + `systemctl --user restart nanobot.service`。
 - `nanobot.service` 使用 SIGTERM 停止，nanobot 会走清理流程（MCP/channels/cron/heartbeat）。
 - `/admin restart` 的临时回执文件路径：`~/.nanobot/workspace/sessions/_runtime/restart-notify.json`（启动后成功读取即删除）。
