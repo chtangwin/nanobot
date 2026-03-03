@@ -314,8 +314,11 @@ class TelegramChannel(BaseChannel):
             if provider == "deepgram":
                 from nanobot.providers.deepgram_transcription import DeepgramTranscriptionProvider
                 model = (cfg.model if cfg and cfg.model else "nova-3")
+                language = (cfg.language if cfg and getattr(cfg, "language", "") else "")
                 transcriber = DeepgramTranscriptionProvider(
-                    api_key=cfg.api_key if cfg else None, model=model
+                    api_key=cfg.api_key if cfg else None,
+                    model=model,
+                    language=language,
                 )
             else:
                 from nanobot.providers.transcription import GroqTranscriptionProvider
@@ -513,7 +516,12 @@ class TelegramChannel(BaseChannel):
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])
                         content_parts.append(f"[transcription: {transcription}]")
                     else:
+                        provider = (self.transcription_config.provider if self.transcription_config else "groq")
+                        language = (self.transcription_config.language if self.transcription_config else "")
                         content_parts.append(f"[{media_type}: {file_path}]")
+                        content_parts.append(
+                            f"[transcription-empty: provider={provider}, language={language or '-'}]"
+                        )
                     # Mark this chat for TTS reply (used by auto mode)
                     self._voice_chats.add(str(chat_id))
                 else:

@@ -13,10 +13,11 @@ class DeepgramTranscriptionProvider:
     Sends raw bytes with Content-Type header (recommended by Deepgram).
     """
 
-    def __init__(self, api_key: str | None = None, model: str = "nova-3"):
+    def __init__(self, api_key: str | None = None, model: str = "nova-3", language: str = ""):
         self.api_key = api_key or os.environ.get("DEEPGRAM_API_KEY")
         self.api_url = "https://api.deepgram.com/v1/listen"
         self.model = model
+        self.language = (language or "").strip()
 
     async def transcribe(
         self, file_path: str | Path, mime_type: str | None = None
@@ -46,12 +47,16 @@ class DeepgramTranscriptionProvider:
             audio_bytes = path.read_bytes()
 
             async with httpx.AsyncClient() as client:
+                params = {
+                    "model": self.model,
+                    "smart_format": "true",
+                }
+                if self.language:
+                    params["language"] = self.language
+
                 response = await client.post(
                     self.api_url,
-                    params={
-                        "model": self.model,
-                        "smart_format": "true",
-                    },
+                    params=params,
                     headers={
                         "Authorization": f"Token {self.api_key}",
                         "Content-Type": content_type,
@@ -76,8 +81,9 @@ class DeepgramTranscriptionProvider:
                     request_id = result.get("metadata", {}).get("request_id", "")
                     duration = result.get("metadata", {}).get("duration", "")
                     logger.warning(
-                        "Deepgram returned empty transcript (model={}, mime={}, request_id={}, duration={})",
+                        "Deepgram returned empty transcript (model={}, language={}, mime={}, request_id={}, duration={})",
                         self.model,
+                        self.language or "",
                         content_type,
                         request_id,
                         duration,
