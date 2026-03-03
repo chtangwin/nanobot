@@ -196,59 +196,70 @@ class XComAdapter(Adapter):
         max_scrolls = cfg.discovery_max_scrolls * 2 if discovery_mode else cfg.discovery_max_scrolls
 
         try:
+            browser = None
+            context = None
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                context_kwargs = dict(
-                    viewport={"width": 1280, "height": 900},
-                    user_agent=DEFAULT_HEADERS["User-Agent"],
-                )
-                if auth_file:
-                    context_kwargs["storage_state"] = str(auth_file)
+                try:
+                    browser = await p.chromium.launch(headless=True)
+                    context_kwargs = dict(
+                        viewport={"width": 1280, "height": 900},
+                        user_agent=DEFAULT_HEADERS["User-Agent"],
+                    )
+                    if auth_file:
+                        context_kwargs["storage_state"] = str(auth_file)
 
-                context = await browser.new_context(**context_kwargs)
-                page = await context.new_page()
+                    context = await browser.new_context(**context_kwargs)
+                    page = await context.new_page()
 
-                await page.goto(url, wait_until="domcontentloaded",
-                                timeout=int(cfg.browser_timeout_s * 1000))
-                await page.wait_for_timeout(3000)
+                    await page.goto(url, wait_until="domcontentloaded",
+                                    timeout=int(cfg.browser_timeout_s * 1000))
+                    await page.wait_for_timeout(3000)
 
-                # Check page title for errors
-                title = await page.title()
-                page_url = page.url
+                    # Check page title for errors
+                    title = await page.title()
+                    page_url = page.url
 
-                collected: dict[str, dict] = {}
-                actions: list[str] = []
-                no_new_count = 0
-                scroll_count = 0
+                    collected: dict[str, dict] = {}
+                    actions: list[str] = []
+                    no_new_count = 0
+                    scroll_count = 0
 
-                while scroll_count < max_scrolls:
-                    tweets = await page.evaluate(_JS_EXTRACT_TWEETS)
+                    while scroll_count < max_scrolls:
+                        tweets = await page.evaluate(_JS_EXTRACT_TWEETS)
 
-                    prev_count = len(collected)
-                    for tweet in tweets:
-                        key = tweet.get("url") or f"{tweet.get('date', '')}|{tweet.get('text', '')[:200]}"
-                        if key and key not in collected:
-                            collected[key] = tweet
+                        prev_count = len(collected)
+                        for tweet in tweets:
+                            key = tweet.get("url") or f"{tweet.get('date', '')}|{tweet.get('text', '')[:200]}"
+                            if key and key not in collected:
+                                collected[key] = tweet
 
-                    new_count = len(collected) - prev_count
-                    scroll_count += 1
+                        new_count = len(collected) - prev_count
+                        scroll_count += 1
 
-                    if new_count > 0:
-                        no_new_count = 0
-                        actions.append(f"scroll:+{new_count}")
-                    else:
-                        no_new_count += 1
-                        if no_new_count >= max_no_new:
-                            break
+                        if new_count > 0:
+                            no_new_count = 0
+                            actions.append(f"scroll:+{new_count}")
+                        else:
+                            no_new_count += 1
+                            if no_new_count >= max_no_new:
+                                break
 
-                    # Scroll
-                    await page.mouse.wheel(0, 1200)
-                    await page.wait_for_timeout(800)
-                    if scroll_count % 10 == 0:
-                        await page.wait_for_timeout(1500)
-
-                await context.close()
-                await browser.close()
+                        # Scroll
+                        await page.mouse.wheel(0, 1200)
+                        await page.wait_for_timeout(800)
+                        if scroll_count % 10 == 0:
+                            await page.wait_for_timeout(1500)
+                finally:
+                    if context:
+                        try:
+                            await context.close()
+                        except Exception:
+                            pass
+                    if browser:
+                        try:
+                            await browser.close()
+                        except Exception:
+                            pass
 
             posts = list(collected.values())
             content = _format_posts_as_text(posts, username)
@@ -292,29 +303,40 @@ class XComAdapter(Adapter):
         auth_file = _find_auth_file()
 
         try:
+            browser = None
+            context = None
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                context_kwargs = dict(
-                    viewport={"width": 1280, "height": 900},
-                    user_agent=DEFAULT_HEADERS["User-Agent"],
-                )
-                if auth_file:
-                    context_kwargs["storage_state"] = str(auth_file)
+                try:
+                    browser = await p.chromium.launch(headless=True)
+                    context_kwargs = dict(
+                        viewport={"width": 1280, "height": 900},
+                        user_agent=DEFAULT_HEADERS["User-Agent"],
+                    )
+                    if auth_file:
+                        context_kwargs["storage_state"] = str(auth_file)
 
-                context = await browser.new_context(**context_kwargs)
-                page = await context.new_page()
+                    context = await browser.new_context(**context_kwargs)
+                    page = await context.new_page()
 
-                await page.goto(url, wait_until="domcontentloaded",
-                                timeout=int(cfg.browser_timeout_s * 1000))
-                await page.wait_for_timeout(3000)
+                    await page.goto(url, wait_until="domcontentloaded",
+                                    timeout=int(cfg.browser_timeout_s * 1000))
+                    await page.wait_for_timeout(3000)
 
-                tweets = await page.evaluate(_JS_EXTRACT_TWEETS)
-                body_text = clean_text(await page.locator("body").inner_text())
-                title = await page.title()
-                final_url = page.url
-
-                await context.close()
-                await browser.close()
+                    tweets = await page.evaluate(_JS_EXTRACT_TWEETS)
+                    body_text = clean_text(await page.locator("body").inner_text())
+                    title = await page.title()
+                    final_url = page.url
+                finally:
+                    if context:
+                        try:
+                            await context.close()
+                        except Exception:
+                            pass
+                    if browser:
+                        try:
+                            await browser.close()
+                        except Exception:
+                            pass
 
             if tweets:
                 content = _format_posts_as_text(tweets[:1], "tweet")

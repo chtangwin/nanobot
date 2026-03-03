@@ -225,22 +225,33 @@ class TestXComAdapter:
         assert isinstance(r.discovered_items, int)
 
     async def test_tau_rho_ai_profile(self):
-        """Test @tau_rho_ai profile - should have posts but currently returns 0.
+        """@tau_rho_ai should return real profile posts via XComAdapter.
 
-        KNOWN ISSUE: Returns 0 posts even though account has tweets.
-        This test documents the bug for investigation.
+        This is a real-network integration test against x.com and expects
+        extractable timeline items (status links + post text).
         """
-        cfg = FetchConfig(browser_timeout_s=25.0, browser_post_wait_ms=3000)
-        r = await robust_fetch("https://x.com/tau_rho_ai", cfg)
+        url = BENCHMARKS["adapter_x_tau_rho_ai"]["url"]
+        cfg = FetchConfig(
+            browser_timeout_s=30.0,
+            browser_post_wait_ms=2200,
+            discovery_max_scrolls=24,
+            discovery_stall_rounds=3,
+        )
+        r = await robust_fetch(url, cfg)
 
         _assert_result_valid(r)
         assert r.source_tier == "adapter:x_com"
+        assert r.extractor == "x_com_scraper"
+        assert r.ok is True, f"Expected successful fetch for {url}, got error: {r.error}"
 
-        # TODO: This should pass but currently fails
-        # The account has tweets but we're not getting them
-        # Possible causes:
-        # - Account suspended (shows "suspended" in page)
-        # - Auth token insufficient
-        # - Rate limiting
-        # - DOM structure different for suspended/limited accounts
-        assert r.discovered_items > 0, f"Expected posts from @tau_rho_ai but got {r.discovered_items}. Error: {r.error}"
+        # Must get real post entries (not fallback/no-data text)
+        assert r.discovered_items > 0, (
+            f"Expected posts from @tau_rho_ai but got {r.discovered_items}. Error: {r.error}"
+        )
+        assert "No posts found for @tau_rho_ai" not in r.content
+
+        # Validate this is real X timeline content
+        assert re.search(r"https://x\.com/tau_rho_ai/status/\d+", r.content), (
+            "Expected at least one status URL in formatted output"
+        )
+        assert "Posts from @tau_rho_ai" in r.content
