@@ -659,7 +659,114 @@ Pi: 根据 webfetch skill，对于分页列表应使用 mode="discovery"...
 
 ---
 
-## 21. Phase 总结
+## 21. 聊天中如何使用 `web_fetch`（从简单到复杂）
+
+下面给出在聊天里可直接使用的示例，帮助你快速选择参数。
+
+### 21.1 最简单：抓一个普通网页（snapshot）
+
+**用户：**
+> 帮我抓取这个页面正文：https://httpbin.org/html
+
+**助手建议调用：**
+```json
+{
+  "url": "https://httpbin.org/html"
+}
+```
+
+**说明：**
+- 只传 `url` 即可，默认 `mode="snapshot"`。
+- 系统会先走 HTTP 快路径，必要时自动升级浏览器。
+
+---
+
+### 21.2 指定返回长度
+
+**用户：**
+> 抓这个页面，但最多返回 8000 字符：https://example.com/article
+
+**助手建议调用：**
+```json
+{
+  "url": "https://example.com/article",
+  "maxChars": 8000
+}
+```
+
+---
+
+### 21.3 JS/SPA 页面：强制浏览器
+
+**用户：**
+> 这个站点是 JS 渲染，直接用浏览器抓：https://ip.sb/
+
+**助手建议调用：**
+```json
+{
+  "url": "https://ip.sb/",
+  "forceBrowser": true
+}
+```
+
+**说明：**
+- `forceBrowser=true` 会跳过 HTTP，直接进入 Playwright。
+- 适合已知 SPA、仪表盘、前端渲染页面。
+
+---
+
+### 21.4 分页/“加载更多”：discovery 模式
+
+**用户：**
+> 把 airank.dev 的模型榜尽量翻页抓全。
+
+**助手建议调用：**
+```json
+{
+  "url": "https://airank.dev",
+  "mode": "discovery"
+}
+```
+
+**说明：**
+- discovery 会尝试点击 `See More / Next / Load More` 并滚动。
+- 结果里可检查：`discovery_actions` 与 `discovered_items`。
+
+---
+
+### 21.5 X/Twitter 账号抓取（自动走 adapter）
+
+**用户：**
+> 抓取 @tau_rho_ai 最近帖子。
+
+**助手建议调用：**
+```json
+{
+  "url": "https://x.com/tau_rho_ai"
+}
+```
+
+**说明：**
+- `x.com` / `twitter.com` 会自动路由到 `XComAdapter`。
+- 返回中通常会看到：`source_tier="adapter:x_com"`、`extractor="x_com_scraper"`。
+- 若登录态失效，会在 `error` 中提示并返回可诊断信息。
+
+---
+
+### 21.6 结果判读（建议）
+
+拿到结果后，优先关注这几个字段：
+
+- `ok`：是否成功
+- `source_tier`：来自 `http / browser / adapter:*`
+- `needs_browser_reason`：为何升级浏览器
+- `discovery_actions`：实际执行了哪些点击/滚动
+- `discovered_items`：发现条目数量
+- `error`：失败原因（如超时、登录态问题）
+
+---
+
+## 22. Phase 总结
 
 | Phase | 状态 | 交付物 |
 |-------|------|--------|
