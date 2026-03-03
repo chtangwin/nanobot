@@ -6,6 +6,7 @@ import logging
 import shutil
 import tempfile
 import uuid
+import shlex
 from typing import Optional, Any
 from pathlib import Path
 
@@ -41,6 +42,7 @@ class RemoteHost:
     def __init__(self, config: HostConfig):
         self.config = config
         self.session_id: Optional[str] = None
+        self.local_port: Optional[int] = None  # Runtime-only local SSH tunnel port
         self.tunnel_process: Optional[asyncio.subprocess.Process] = None
         self.websocket: Optional[Any] = None
         self._running = False
@@ -85,6 +87,9 @@ class RemoteHost:
 
             # Authenticate
             await self._authenticate()
+
+            # Initialize tmux cwd once for fresh sessions
+            await self._initialize_workspace()
 
             self._running = True
             logger.info(f"Remote host {self.config.name} connected (session: {self.session_id})")
@@ -213,6 +218,57 @@ class RemoteHost:
             await self._mark_transport_down()
             return False
 
+    async def _send_rpc_impl(self, message: dict, timeout: float = 30.0) -> dict:
+        """Low-level RPC send/recv on an already-ready transport.
+
+        Preconditions: websocket connected and authenticated.
+        """
+        request_id = message.get("request_id")
+
+        await self.websocket.send(json.dumps(message))
+        response = await asyncio.wait_for(self.websocket.recv(), timeout=timeout)
+        data = json.loads(response)
+
+        if request_id and data.get("request_id") and data.get("request_id") != request_id:
+            return {"success": False, "error": "Mismatched request_id in response"}
+
+        if data.get("type") == "result":
+            return data
+        if data.get("type") in ("error", "shutdown_ack"):
+            return {"success": False, "error": data.get("message", "Unknown error")}
+        if data.get("type") == "pong":
+            return {"success": True, "type": "pong"}
+        return {"success": False, "error": f"Unexpected response type: {data.get('type')}"}
+
+    async def _initialize_workspace(self) -> None:
+        """Initialize tmux working directory once for fresh sessions.
+
+        This runs only in setup() after authentication and before marking the
+        host as fully running. Resume/transport-recovery paths intentionally do
+        not call this so existing tmux cwd is preserved.
+        """
+        workspace = (self.config.workspace or "").strip()
+        if not workspace:
+            return
+
+        cmd = f"cd {shlex.quote(workspace)}"
+        message = {
+            "type": "exec",
+            "command": cmd,
+            "request_id": uuid.uuid4().hex,
+        }
+
+        try:
+            result = await self._send_rpc_impl(message, timeout=15.0)
+            if not result.get("success", False):
+                logger.warning(
+                    f"Workspace init failed on {self.config.name}: {workspace} -> {result.get('error')}"
+                )
+            else:
+                logger.info(f"Workspace initialized on {self.config.name}: {workspace}")
+        except Exception as e:
+            logger.warning(f"Workspace init error on {self.config.name}: {workspace} -> {e}")
+
     async def _rpc(self, message: dict, timeout: float = 30.0) -> dict:
         """Send one RPC message to remote_server and return normalized result.
 
@@ -232,21 +288,7 @@ class RemoteHost:
 
         for attempt in range(2):
             try:
-                await self.websocket.send(json.dumps(message))
-                response = await asyncio.wait_for(self.websocket.recv(), timeout=timeout)
-                data = json.loads(response)
-
-                if data.get("request_id") and data.get("request_id") != request_id:
-                    return {"success": False, "error": "Mismatched request_id in response"}
-
-                if data.get("type") == "result":
-                    return data
-                if data.get("type") in ("error", "shutdown_ack"):
-                    return {"success": False, "error": data.get("message", "Unknown error")}
-                if data.get("type") == "pong":
-                    return {"success": True, "type": "pong"}
-                return {"success": False, "error": f"Unexpected response type: {data.get('type')}"}
-
+                return await self._send_rpc_impl(message, timeout=timeout)
             except asyncio.TimeoutError:
                 return {"success": False, "error": f"Command timed out after {timeout} seconds"}
             except Exception as e:
@@ -363,18 +405,18 @@ class RemoteHost:
 
     async def _create_ssh_tunnel(self):
         """Create SSH tunnel to remote host."""
-        # Auto-assign local port if not specified
-        if self.config.local_port is None:
+        # Auto-assign local port
+        if self.local_port is None:
             import socket
             sock = socket.socket()
             sock.bind(("", 0))
-            self.config.local_port = sock.getsockname()[1]
+            self.local_port = sock.getsockname()[1]
             sock.close()
 
         ssh_cmd = [
             "ssh",
             "-N",  # No remote commands
-            "-L", f"{self.config.local_port}:127.0.0.1:{self.config.remote_port}",
+            "-L", f"{self.local_port}:127.0.0.1:{self.config.remote_port}",
             "-p", str(self.config.ssh_port),
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
@@ -385,7 +427,7 @@ class RemoteHost:
 
         ssh_cmd.append(self.config.ssh_host)
 
-        logger.info(f"Creating SSH tunnel: {self.config.ssh_host} -> localhost:{self.config.local_port}")
+        logger.info(f"Creating SSH tunnel: {self.config.ssh_host} -> localhost:{self.local_port}")
 
         self.tunnel_process = await asyncio.create_subprocess_exec(
             *ssh_cmd,
@@ -579,7 +621,7 @@ class RemoteHost:
 
     async def _connect_websocket(self):
         """Connect to remote host via WebSocket."""
-        ws_url = f"ws://127.0.0.1:{self.config.local_port}"
+        ws_url = f"ws://127.0.0.1:{self.local_port}"
 
         logger.info(f"Connecting to WebSocket: {ws_url}")
 

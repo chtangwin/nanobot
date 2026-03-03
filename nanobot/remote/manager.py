@@ -118,7 +118,6 @@ class HostManager:
         if config:
             config.active_session = {
                 "session_id": host.session_id,
-                "local_port": config.local_port,
                 "remote_port": config.remote_port,
                 "auth_token": config.auth_token,
             }
@@ -145,8 +144,6 @@ class HostManager:
             return None
 
         # Restore dynamic fields from persisted session
-        if config.active_session.get("local_port"):
-            config.local_port = config.active_session["local_port"]
         if config.active_session.get("remote_port"):
             config.remote_port = config.active_session["remote_port"]
         if config.active_session.get("auth_token"):
