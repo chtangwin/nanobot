@@ -16,7 +16,6 @@ class HostConfig:
     ssh_port: int = 22
     ssh_key_path: Optional[str] = None
     remote_port: int = 8765  # WebSocket server port on remote
-    local_port: Optional[int] = None  # Local port for SSH tunnel
     auth_token: Optional[str] = None
     workspace: Optional[str] = None
 
@@ -27,7 +26,6 @@ class HostConfig:
             "ssh_port": self.ssh_port,
             "ssh_key_path": self.ssh_key_path,
             "remote_port": self.remote_port,
-            "local_port": self.local_port,
             "auth_token": self.auth_token,
             "workspace": self.workspace,
         }
