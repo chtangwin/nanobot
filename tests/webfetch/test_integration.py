@@ -223,3 +223,24 @@ class TestXComAdapter:
         assert r.source_tier == "adapter:x_com"
         assert r.extractor == "x_com_scraper"
         assert isinstance(r.discovered_items, int)
+
+    async def test_tau_rho_ai_profile(self):
+        """Test @tau_rho_ai profile - should have posts but currently returns 0.
+
+        KNOWN ISSUE: Returns 0 posts even though account has tweets.
+        This test documents the bug for investigation.
+        """
+        cfg = FetchConfig(browser_timeout_s=25.0, browser_post_wait_ms=3000)
+        r = await robust_fetch("https://x.com/tau_rho_ai", cfg)
+
+        _assert_result_valid(r)
+        assert r.source_tier == "adapter:x_com"
+
+        # TODO: This should pass but currently fails
+        # The account has tweets but we're not getting them
+        # Possible causes:
+        # - Account suspended (shows "suspended" in page)
+        # - Auth token insufficient
+        # - Rate limiting
+        # - DOM structure different for suspended/limited accounts
+        assert r.discovered_items > 0, f"Expected posts from @tau_rho_ai but got {r.discovered_items}. Error: {r.error}"
