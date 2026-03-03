@@ -40,20 +40,18 @@ The `web_fetch` tool supports three modes. Choose the right one for your task:
 X URLs are automatically handled by a dedicated adapter:
 - Profile URLs (`x.com/username`): scrolls and collects posts with text, dates, engagement, media
 - Tweet URLs (`x.com/user/status/123`): fetches individual tweet content
-- Requires login state (`x_auth.json`), searched in order:
-  1. `~/.pi/agent/skills/x-scraper/x_auth.json` (skill directory)
-  2. `nanobot/webfetch/adapters/x_auth.json` (code directory)
-- If posts are missing or few, the auth may have expired
+- Uses auth from `~/.nanobot/auth/x_auth.json` (preferred) or built-in placeholder
+- Default placeholder auth may only return ~10-15 posts; generate your own for full access
 
 ### Setting up X login
 
-Run once to save login state:
+Run once to generate your own auth file:
 
 ```bash
 uv run python -m nanobot.webfetch.adapters.x_login
 ```
 
-This opens a browser window. Log into X manually; the script auto-detects successful login.
+This opens a browser window. Log into X manually; the script auto-detects successful login and saves auth to `~/.nanobot/auth/x_auth.json`.
 
 ## Response Fields
 

@@ -17,14 +17,29 @@ from nanobot.webfetch.adapters.base import Adapter
 from nanobot.webfetch.core.extractors import clean_text
 from nanobot.webfetch.core.models import DEFAULT_HEADERS, FetchConfig, FetchResult
 
-# Auth file search paths (first match wins):
-#   1. x-scraper skill directory (canonical location, shared with skill)
-#   2. Same directory as this adapter code (code-local fallback)
+# Auth file locations (first match wins):
+#   1. ~/.nanobot/auth/x_auth.json (user-generated, preferred)
+#   2. nanobot/webfetch/adapters/x_auth.json (built-in default)
 _ADAPTER_DIR = Path(__file__).parent
 _AUTH_SEARCH_PATHS = [
-    Path.home() / ".pi" / "agent" / "skills" / "x-scraper" / "x_auth.json",
+    Path.home() / ".nanobot" / "auth" / "x_auth.json",
     _ADAPTER_DIR / "x_auth.json",
 ]
+
+# Error message when auth is missing/invalid
+_AUTH_MISSING_MSG = """
+No X auth found or auth has expired.
+
+To generate a working auth file:
+  1. Run: uv run python -m nanobot.webfetch.adapters.x_login
+  2. Log into X in the browser window when it opens
+  3. Auth will be saved to: ~/.nanobot/auth/x_auth.json
+
+Or manually export cookies from Brave:
+  1. Open Brave DevTools at x.com (logged in)
+  2. Application > Cookies > https://x.com
+  3. Copy cookies and create the auth file
+"""
 
 # JS: extract tweets from current viewport
 _JS_EXTRACT_TWEETS = """() => {
@@ -77,10 +92,10 @@ _JS_EXTRACT_TWEETS = """() => {
 
 
 def _find_auth_file() -> Path | None:
-    """Find the first existing auth file from search paths."""
-    for p in _AUTH_SEARCH_PATHS:
-        if p.exists():
-            return p
+    """Find auth file. Returns path if exists, else None."""
+    for path in _AUTH_SEARCH_PATHS:
+        if path.exists():
+            return path
     return None
 
 
@@ -257,7 +272,7 @@ class XComAdapter(Adapter):
                 status_code=None,
                 needs_browser_reason="adapter_x_com" if not auth_file else None,
                 extractor="x_com_scraper",
-                error=None if ok else f"No posts found for @{username}",
+                error=None if ok else f"No posts found for @{username}.{_AUTH_MISSING_MSG if not auth_file else ''}",
                 discovery_actions=actions,
                 discovered_items=len(posts),
             )

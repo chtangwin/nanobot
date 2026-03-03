@@ -1,0 +1,109 @@
+{
+  "cookies": [
+    {
+      "name": "guest_id",
+      "value": "v1%3A175790541869512016",
+      "domain": ".x.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "__cuid",
+      "value": "f303438cbe9c41259aa3d53e031d31bd",
+      "domain": ".x.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ct0",
+      "value": "112c10860776ee9f5186d2994e114a6b6fbda7580d3ec9e24a0160002967b387965e5b2b5407f059b2d6357532666743496a7cb98c012e328abf2042c417351d56329a02b5c347e78f5cb56c91d9641a",
+      "domain": ".x.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "twid",
+      "value": "u%3D1976062543178366977",
+      "domain": ".x.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "d_prefs",
+      "value": "MjoxLGNvbnNlbnRfdmVyc2lvbjoyLHRleHRfdmVyc2lvbjoxMDAw",
+      "domain": ".x.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "guest_id_marketing",
+      "value": "v1%3A175790541869512016",
+      "domain": ".x.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "guest_id_ads",
+      "value": "v1%3A175790541869512016",
+      "domain": ".x.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "personalization_id",
+      "value": "\"v1_on/Gx9SPqfQ4zEbGm5rBrg",
+      "domain": ".x.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "lang",
+      "value": "en",
+      "domain": ".x.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "external_referer",
+      "value": "padhuUp37zgNcXTj8cPDSVgop4AGy5jgAiS3HqH4%2FGNvZB2SVtsJCGU2JCUoWDwdfuuyrOCeXq33aQ7w13q9Sw%3D%3D|0|GlWr2u5wzZipnVja1ZbglFG7jRzcDRbyNwPUPrWC%2FQdb1FU%2Fn%2FKAMnwFKs%2Bz9jPf8IGehoz5z%2FJSJh7NKGO2zVWeyUE28mNXuRPuGTEj3UnJRZe1Www0eV0TQQlpmx4nIglT8siHF98xq87hbz3%2Brw%3D%3D",
+      "domain": ".x.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "g_state",
+      "value": "{\"i_l\":0,\"i_ll\":1772504443537,\"i_e\":{\"enable_itp_optimization\":0}}",
+      "domain": ".x.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://x.com",
+      "localStorage": []
+    }
+  ]
+}

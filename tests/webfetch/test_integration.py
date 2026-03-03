@@ -193,13 +193,13 @@ class TestXComAdapter:
     """https://x.com/elonmusk — strong anti-scrape; adapter needed (Phase 3).
 
     Currently expected to fail or produce limited content.
-    These tests document the baseline before adapter implementation.
+    These tests validate XComAdapter with real X.com requests.
     """
 
     URL = BENCHMARKS["adapter_x"]["url"]
 
-    async def test_snapshot_baseline(self):
-        """Record current behavior — likely fails or gets login wall."""
+    async def test_snapshot_with_adapter(self):
+        """X URLs route through XComAdapter and return structured content."""
         cfg = FetchConfig(
             http_read_timeout_s=15.0,
             browser_timeout_s=25.0,
@@ -207,11 +207,19 @@ class TestXComAdapter:
         )
         r = await robust_fetch(self.URL, cfg)
         _assert_result_valid(r)
-        # Document baseline — don't assert ok=True since adapter not built yet
-        # Just ensure no crash and valid result structure
+        # X URLs are routed to XComAdapter
+        assert r.source_tier == "adapter:x_com"
+        assert r.extractor == "x_com_scraper"
+        # Should have some content (may be limited with placeholder auth)
+        assert r.content is not None
+        # discovered_items should be a number
+        assert isinstance(r.discovered_items, int)
 
-    async def test_force_browser_baseline(self):
+    async def test_force_browser_with_adapter(self):
+        """Even with force_browser, X URLs still route through adapter."""
         cfg = FetchConfig(browser_timeout_s=25.0, browser_post_wait_ms=3000)
         r = await robust_fetch(self.URL, cfg, force_browser=True)
         _assert_result_valid(r)
-        assert r.source_tier == "browser"
+        assert r.source_tier == "adapter:x_com"
+        assert r.extractor == "x_com_scraper"
+        assert isinstance(r.discovered_items, int)
