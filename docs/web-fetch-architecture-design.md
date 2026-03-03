@@ -558,3 +558,114 @@ nanobot/webfetch/adapters/
 - **Registry 简单路由**：域名匹配即可（`x.com` / `twitter.com` → `XComAdapter`）
 - **x_com adapter 可分阶段**：先桥接现有 x-scraper，后续再内化
 - **不改 tool 层**：adapter 对 `WebFetchTool` 透明，只在 pipeline 内部路由
+
+---
+
+## 19. Phase 4 实施记录
+
+> 完成日期：2026-03-03 · 分支：`feature/webfetch`
+
+### 19.1 Benchmark 框架（`tests/webfetch/run_benchmarks.py`）
+
+自动化基准测试套件，记录成功率、时延、字段完整性。
+
+**Benchmark 目标（5 个）：**
+
+| Key | URL | 场景 | 期望 Tier |
+|-----|-----|------|----------|
+| `plain_html` | httpbin.org/html | 静态 HTML | http/browser |
+| `javascript_spa` | ip.sb | JS/SPA | browser |
+| `discovery_pagination` | airank.dev | 分页发现 | browser |
+| `adapter_x` | x.com/elonmusk | X 适配器 | adapter:x_com |
+| `adapter_x_tau_rho_ai` | x.com/tau_rho_ai | X auth_token | adapter:x_com |
+
+**运行方式：**
+
+```bash
+# 运行所有 benchmark
+uv run python tests/webfetch/run_benchmarks.py
+
+# 保存 JSON 报告
+uv run python tests/webfetch/run_benchmarks.py --output report.json
+
+# 只显示摘要
+uv run python tests/web_fetch/run_benchmarks.py --quiet
+```
+
+**指标：**
+- 成功率：5/5 (100%)
+- 平均延迟：14.2s
+- 层级分布：3 browser, 2 adapter:x_com
+
+**注意：** `run_benchmarks.py` 不会被 pytest 自动触发（文件名不匹配 `test_*.py` 模式）。
+
+### 19.2 CLI 工具（`tests/webfetch/run_web_fetch.py`）
+
+原 `scripts/web_fetch_robust.py` 的薄包装，用于手动测试和调试。
+
+**运行方式：**
+
+```bash
+# 基本用法
+uv run python tests/webfetch/run_web_fetch.py "https://example.com"
+
+# JSON 输出
+uv run python tests/webfetch/run_web_fetch.py "https://example.com" --json
+
+# Discovery 模式
+uv run python tests/webfetch/run_web_fetch.py "https://airank.dev" --mode discovery --json
+
+# 强制浏览器
+uv run python tests/webfetch/run_web_fetch.py "https://ip.sb" --force-browser
+```
+
+---
+
+## 20. 部署 Skill
+
+`webfetch` skill 位于 `nanobot/skills/webfetch/SKILL.md`，为 LLM 提供使用指南。
+
+### 20.1 Skill 内容
+
+- **Quick Reference**：何时用 snapshot/discovery/forceBrowser
+- **X/Twitter**：自动路由说明、登录态要求
+- **Response Fields**：返回字段说明
+- **Troubleshooting**：常见问题解决
+
+### 20.2 安装到 Pi
+
+Skill 文件已在项目代码库中（`nanobot/skills/webfetch/SKILL.md`），无需额外安装。Pi 会自动发现项目内的 skills 目录。
+
+### 20.3 手动安装（可选）
+
+如果想将 skill 复制到用户 workspace：
+
+```bash
+# 复制 skill 到用户 workspace
+cp -r nanobot/skills/webfetch ~/.nanobot/workspace/skills/
+
+# 或创建符号链接（推荐）
+ln -s "$(pwd)/nanobot/skills/webfetch" ~/.nanobot/workspace/skills/webfetch
+```
+
+### 20.4 验证 Skill 加载
+
+在 pi 中询问 skill 相关问题，LLM 应该引用 webfetch skill 的内容：
+
+```
+User: How do I fetch a paginated list?
+Pi: 根据 webfetch skill，对于分页列表应使用 mode="discovery"...
+```
+
+---
+
+## 21. Phase 总结
+
+| Phase | 状态 | 交付物 |
+|-------|------|--------|
+| Phase 1 | ✅ 完成 | Core package (`nanobot/webfetch/core/`) |
+| Phase 2 | ✅ 完成 | WebFetchTool 替换、lazy import |
+| Phase 3 | ✅ 完成 | Adapter 层 (`base`, `generic`, `x_com`, `registry`) + X 完全支持 |
+| Phase 4 | ✅ 完成 | Benchmark 框架 + CLI 工具 + Skill 文档 |
+
+**下一步：** 合并 `feature/webfetch` 分支到主分支。
