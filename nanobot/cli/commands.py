@@ -440,8 +440,6 @@ def gateway(
         ))
 
     async def run():
-        agent_task: asyncio.Task | None = None
-        channels_task: asyncio.Task | None = None
         try:
             await cron.start()
             await heartbeat.start()
@@ -449,12 +447,11 @@ def gateway(
                 await todos_reminder.start()
             if todos_cfg.enabled and todos_cfg.report_enabled:
                 await todos_report.start()
-
-            agent_task = asyncio.create_task(agent.run())
-            channels_task = asyncio.create_task(channels.start_all())
-
             await _deliver_pending_restart_notice()
-            await asyncio.gather(agent_task, channels_task)
+            await asyncio.gather(
+                agent.run(),
+                channels.start_all(),
+            )
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
@@ -465,11 +462,6 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
-            for task in (agent_task, channels_task):
-                if task and not task.done():
-                    task.cancel()
-            if agent_task or channels_task:
-                await asyncio.gather(*(t for t in (agent_task, channels_task) if t), return_exceptions=True)
     
     asyncio.run(run())
 
