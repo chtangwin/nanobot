@@ -254,6 +254,86 @@ display-name = "Your Name"
 # ... 公司邮箱配置 ...
 ```
 
+### 同一提供商多个账户
+
+同一邮箱提供商的多个账户（如两个 Gmail）完全支持，给不同的账户名即可：
+
+```toml
+[accounts.gmail-personal]
+email = "personal@gmail.com"
+display-name = "Your Name"
+default = true
+
+backend.type = "imap"
+backend.host = "imap.gmail.com"
+backend.port = 993
+backend.encryption.type = "tls"
+backend.login = "personal@gmail.com"
+backend.auth.type = "password"
+backend.auth.keyring = "himalaya-gmail-personal"    # 每个账户用不同的 keyring 名
+
+folder.alias.inbox = "INBOX"
+folder.alias.sent = "[Gmail]/Sent Mail"
+folder.alias.drafts = "[Gmail]/Drafts"
+folder.alias.trash = "[Gmail]/Trash"
+
+message.send.backend.type = "smtp"
+message.send.backend.host = "smtp.gmail.com"
+message.send.backend.port = 587
+message.send.backend.encryption.type = "start-tls"
+message.send.backend.login = "personal@gmail.com"
+message.send.backend.auth.type = "password"
+message.send.backend.auth.keyring = "himalaya-gmail-personal"
+
+[accounts.gmail-work]
+email = "work@gmail.com"
+display-name = "Your Name (Work)"
+
+backend.type = "imap"
+backend.host = "imap.gmail.com"
+backend.port = 993
+backend.encryption.type = "tls"
+backend.login = "work@gmail.com"
+backend.auth.type = "password"
+backend.auth.keyring = "himalaya-gmail-work"        # 不同的 keyring 名
+
+folder.alias.inbox = "INBOX"
+folder.alias.sent = "[Gmail]/Sent Mail"
+folder.alias.drafts = "[Gmail]/Drafts"
+folder.alias.trash = "[Gmail]/Trash"
+
+message.send.backend.type = "smtp"
+message.send.backend.host = "smtp.gmail.com"
+message.send.backend.port = 587
+message.send.backend.encryption.type = "start-tls"
+message.send.backend.login = "work@gmail.com"
+message.send.backend.auth.type = "password"
+message.send.backend.auth.keyring = "himalaya-gmail-work"
+```
+
+注意事项：
+- **每个账户需要各自的 App Password**——Google App Password 绑定到单个 Google 账户，不能共用
+- **keyring 名称必须不同**（如 `himalaya-gmail-personal` vs `himalaya-gmail-work`），否则会互相覆盖
+- IMAP/SMTP 服务器地址相同，只有 `login` 和 `auth` 不同
+- `default = true` 只能设一个账户，其他账户通过 `--account` 切换
+
+使用示例：
+
+```bash
+# 默认账户（gmail-personal）
+himalaya envelope list
+
+# 切换到工作账户
+himalaya --account gmail-work envelope list
+```
+
+在 nanobot 聊天中：
+
+```
+你: 看看我工作 Gmail 的邮件
+nanobot: [调用 himalaya --account gmail-work envelope list]
+```
+
 ### IMAP/SMTP 服务器速查
 
 | 邮箱 | IMAP 服务器 | IMAP 端口 | SMTP 服务器 | SMTP 端口 | SMTP 加密 |
