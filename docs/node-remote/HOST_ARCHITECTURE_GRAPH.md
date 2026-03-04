@@ -21,11 +21,12 @@ classDiagram
 
     class HostsTool {
       +name = "hosts"
+      +exec_tool: ExecTool
       +execute(action,...)
       -_list_hosts()
       -_add_host()
       -_connect_host()
-      -_exec_command()
+      -_exec_command() delegates to ExecTool
     }
 
     class ExecTool {
@@ -110,7 +111,8 @@ classDiagram
     AgentLoop --> ListDirTool : register
     AgentLoop --> CompareTool : register
 
-    HostsTool --> HostManager : direct lifecycle ops
+    HostsTool --> HostManager : lifecycle ops (list/add/remove/connect/disconnect/status)
+    HostsTool --> ExecTool : exec action delegates
 
     ExecTool --> ExecutionBackendRouter : resolve(host)
     ReadFileTool --> ExecutionBackendRouter : resolve(host)
@@ -119,8 +121,8 @@ classDiagram
     ListDirTool --> ExecutionBackendRouter : resolve(host)
     CompareTool --> ExecutionBackendRouter : resolve(local+remote)
 
-    ExecutionBackendRouter --> LocalExecutionBackend : host is empty
-    ExecutionBackendRouter --> HostManager : host provided
+    ExecutionBackendRouter --> LocalExecutionBackend : host is empty OR is_localhost()
+    ExecutionBackendRouter --> HostManager : host provided + not localhost
     HostManager --> RemoteHost : get_or_connect(host)
     ExecutionBackendRouter --> RemoteExecutionBackend : wrap(RemoteHost)
 
@@ -151,15 +153,45 @@ sequenceDiagram
     LLM->>TR: execute("exec", {command, host})
     TR->>ET: ExecTool.execute(...)
     ET->>BR: resolve("myserver")
-    BR->>HM: get_or_connect("myserver")
-    HM->>RH: setup() (if not connected)
-    RH-->>HM: connected
-    BR-->>ET: RemoteExecutionBackend
-    ET->>RH: exec(command)
-    RH->>RS: WS {type:"exec", command:"..."}
-    RS-->>RH: {type:"result", success, output, exit_code}
-    RH-->>ET: result dict
+
+    alt is_localhost(ssh_host) → true
+        BR-->>ET: LocalExecutionBackend
+        ET->>ET: local exec(command)
+    else is_localhost → false
+        BR->>HM: get_or_connect("myserver")
+        HM->>RH: setup() (if not connected)
+        RH-->>HM: connected
+        BR-->>ET: RemoteExecutionBackend
+        ET->>RH: exec(command)
+        RH->>RS: WS {type:"exec", command:"..."}
+        RS-->>RH: {type:"result", success, output, exit_code}
+        RH-->>ET: result dict
+    end
+
     ET-->>TR: formatted text
+    TR-->>LLM: tool result
+```
+
+### 动态流程 A2：`hosts action="exec"` — 走同一路径
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant LLM as LLM
+    participant TR as ToolRegistry
+    participant HT as HostsTool
+    participant ET as ExecTool
+    participant BR as ExecutionBackendRouter
+
+    U->>LLM: "uptime of debian-bot"
+    LLM->>TR: execute("hosts", {action:"exec", name:"debian-bot", command:"uptime"})
+    TR->>HT: HostsTool.execute(...)
+    HT->>ET: ExecTool.execute(command="uptime", host="debian-bot")
+    ET->>BR: resolve("debian-bot")
+    Note over BR: Same routing logic as flow A
+    BR-->>ET: LocalExecutionBackend or RemoteExecutionBackend
+    ET-->>HT: formatted text
+    HT-->>TR: result
     TR-->>LLM: tool result
 ```
 
@@ -192,18 +224,21 @@ sequenceDiagram
 
 ## 4) `hosts` 工具与其他工具的职责边界
 
-- `HostsTool`：**主机生命周期管理入口**（add/connect/disconnect/status/list/exec）。
-- `ExecTool` / `ReadFileTool` / `WriteFileTool` / `EditFileTool` / `ListDirTool` / `CompareTool`：**业务工具**，通过 `ExecutionBackendRouter` 统一选择本地或远程后端。
+- `HostsTool`：**主机生命周期管理**（add/connect/disconnect/status/list）。exec action 委托给 `ExecTool`，保证所有命令执行走统一路径。
+- `ExecTool` / `ReadFileTool` / `WriteFileTool` / `EditFileTool` / `ListDirTool` / `CompareTool`：**业务工具**，通过 `ExecutionBackendRouter` 统一选择本地或远程后端（含 localhost 自动检测）。
 - `HostManager`：**连接生命周期**（连接池、建立/断开连接），不做业务拼装。
 - `RemoteHost` + `remote_server.py`：**远程 RPC 通道**与远端执行实现。
+
+> **设计原则**：所有命令/文件操作最终都经过 `ExecutionBackendRouter.resolve(host)` 这一个决策点。Router 负责 localhost 检测 — 如果 hosts.json 中的主机指向本机 IP，则透明地使用 `LocalExecutionBackend`，无需 SSH/WebSocket。
 
 ---
 
 ## 5) 一句话心智模型
 
-- `hosts` 负责"**我要连哪台机器**"。
-- `backend_router` 负责"**这次操作走本地还是远程**"。
+- `hosts` 负责"**管理机器**"（增删连断查）。
+- `backend_router` 负责"**这次操作走本地还是远程**"（含 localhost 自动检测）。
 - 具体工具负责"**我要做什么操作**"（exec/read/write/edit/list/compare）。
+- `HostsTool.exec` 不自己执行命令 — 委托给 `ExecTool`，走统一路径。
 
 ---
 

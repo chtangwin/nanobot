@@ -96,7 +96,7 @@ class EditFileTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Edit a file by replacing old_text with new_text."
+        return "Edit a file by replacing old_text with new_text. Use host to edit on a remote host."
 
     @property
     def parameters(self) -> dict[str, Any]:

@@ -54,6 +54,14 @@ Lightweight utility module with a single function:
 
 Updated `ExecutionBackendRouter.resolve()` to check if the host is local before creating a `RemoteExecutionBackend`.
 
+### 3. Modified: `nanobot/agent/tools/hosts.py`
+
+`HostsTool._exec_command()` now delegates to `ExecTool.execute(command, host=name)` instead of calling `host_manager.get_or_connect()` directly. This ensures the `hosts action="exec"` path goes through the same `ExecutionBackendRouter` as all other tools, including localhost detection.
+
+### 4. Modified: `nanobot/agent/loop.py`
+
+Pass `exec_tool` reference to `HostsTool` during tool registration.
+
 ## Detection Examples
 
 All of these would be detected as local:
@@ -89,18 +97,14 @@ All of these would be detected as local:
 
 No changes needed to existing workflows. If you have a host entry that points to localhost or a local IP, it will automatically be routed to the local backend.
 
-**Example**:
+**Both tool paths work identically**:
 
-```python
-# This will now use LocalExecutionBackend automatically
-await host_manager.add_host(
-    name="my-local",
-    ssh_host="localhost"
-)
+```
+# Via ExecTool — router detects localhost, runs locally
+exec(host="my-local", command="ls -la")
 
-# Operations run directly without SSH/WebSocket
-host = await host_manager.connect("my-local")
-result = await host.exec("ls -la")  # Runs locally
+# Via HostsTool — delegates to ExecTool, same path
+hosts(action="exec", name="my-local", command="ls -la")
 ```
 
 ## Technical Details
@@ -120,14 +124,20 @@ def is_localhost(ssh_host: str | None) -> bool:
 
 ### Execution Flow
 
+Both `exec(host=...)` and `hosts(action="exec", name=...)` reach the same path:
+
 ```
-User: exec(host="myserver", command="ls")
-    ↓
-ExecutionBackendRouter.resolve("myserver")
-    ↓
-Check: is_localhost(host_config.ssh_host)?
-    ├─ Yes → LocalExecutionBackend (direct execution)
-    └─ No  → RemoteExecutionBackend (SSH → WebSocket → remote_server)
+exec(host="myserver", command="ls")          hosts(action="exec", name="myserver", command="ls")
+    ↓                                             ↓
+ExecTool.execute(command, host)              HostsTool._exec_command(name, command)
+    ↓                                             ↓  delegates to ExecTool
+    └──────────────────┬───────────────────────────┘
+                       ↓
+         ExecutionBackendRouter.resolve("myserver")
+                       ↓
+         is_localhost(host_config.ssh_host)?
+           ├─ Yes → LocalExecutionBackend (direct)
+           └─ No  → RemoteExecutionBackend (SSH → WS → remote_server)
 ```
 
 ## Testing
