@@ -78,6 +78,12 @@ Your workspace is at: {workspace_path}
 - If a tool call fails, analyze the error before retrying with a different approach.
 - Ask for clarification when the request is ambiguous.
 
+## Voice Input Safety
+When a user message contains `[voice transcription`, the text was produced by speech-to-text and may be inaccurate.
+- Interpret the intent generously — minor word errors are expected.
+- Do NOT execute destructive operations (delete files, send messages to others, modify system config, run dangerous commands) based solely on voice input.
+- If the transcription seems to request something destructive or unusual, ask for text confirmation first.
+
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
 
     @staticmethod

@@ -430,7 +430,14 @@ class TelegramChannel(BaseChannel):
                     transcription = await self._transcribe_media(file_path, media_type, mime)
                     if transcription:
                         logger.info("Transcribed {}: {}...", media_type, transcription[:50])
-                        content_parts.append(f"[transcription: {transcription}]")
+                        # Echo transcribed text to user immediately
+                        try:
+                            await self._app.bot.send_message(
+                                chat_id=chat_id, text=f"🎙️ {transcription}",
+                            )
+                        except Exception as e:
+                            logger.warning("Failed to echo transcription: {}", e)
+                        content_parts.append(f"[voice transcription — treat as approximate user intent, may contain errors]\n{transcription}")
                     else:
                         provider = (self.transcription_config.provider if self.transcription_config else "groq")
                         language = (self.transcription_config.language if self.transcription_config else "")
@@ -478,18 +485,21 @@ class TelegramChannel(BaseChannel):
         self._start_typing(str_chat_id)
         
         # Forward to the message bus
+        metadata = {
+            "message_id": message.message_id,
+            "user_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "is_group": message.chat.type != "private",
+        }
+        if media_type in ("voice", "audio"):
+            metadata["source"] = "voice"
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str_chat_id,
             content=content,
             media=media_paths,
-            metadata={
-                "message_id": message.message_id,
-                "user_id": user.id,
-                "username": user.username,
-                "first_name": user.first_name,
-                "is_group": message.chat.type != "private"
-            }
+            metadata=metadata,
         )
     
     async def _flush_media_group(self, key: str) -> None:
