@@ -46,8 +46,7 @@ class ExecTool(Tool):
         return (
             "Execute a shell command and return its output. "
             "For remote hosts (e.g., 'on myserver run ls'), use the 'host' parameter "
-            "instead of manually constructing SSH commands. "
-            "Use 'hosts action=\"list\"' to see available hosts."
+            "instead of manually constructing SSH commands."
         )
 
     @property
@@ -59,7 +58,7 @@ class ExecTool(Tool):
                 "working_dir": {"type": "string", "description": "Optional working directory"},
                 "host": {
                     "type": "string",
-                    "description": "Remote host name from hosts.json (e.g., 'myserver'). Use 'hosts action=\"list\"' to see available hosts. If omitted, run locally. DO NOT manually write SSH commands like 'ssh user@host'.",
+                    "description": "Remote host name. If omitted, run locally.",
                 },
             },
             "required": ["command"],

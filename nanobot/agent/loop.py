@@ -140,12 +140,13 @@ class AgentLoop:
         self.tools.register(ListDirTool(self.backend_router))
 
         # Shell execution tool
-        self.tools.register(ExecTool(
+        exec_tool = ExecTool(
             backend_router=self.backend_router,
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
-        ))
+        )
+        self.tools.register(exec_tool)
 
         # Other tools
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
@@ -153,7 +154,7 @@ class AgentLoop:
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
-        self.tools.register(HostsTool(host_manager=self.host_manager, backend_router=self.backend_router))
+        self.tools.register(HostsTool(host_manager=self.host_manager, exec_tool=exec_tool))
         self.tools.register(CompareDirTool(self.backend_router))
         self.tools.register(CompareFileTool(self.backend_router))
         if self.cron_service:
