@@ -6,6 +6,7 @@ from typing import Any, Optional
 from nanobot.agent.tools.base import Tool
 from nanobot.remote.config import HostsConfig
 from nanobot.remote.manager import HostManager
+from nanobot.agent.backends.router import ExecutionBackendRouter
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,12 @@ logger = logging.getLogger(__name__)
 class HostsTool(Tool):
     """Tool for managing remote hosts and executing commands on them."""
 
-    def __init__(self, config_path: Optional[str] = None, host_manager: Optional[HostManager] = None):
+    def __init__(
+        self,
+        config_path: Optional[str] = None,
+        host_manager: Optional[HostManager] = None,
+        backend_router: Optional[ExecutionBackendRouter] = None
+    ):
         if host_manager:
             self.manager = host_manager
         elif config_path:
@@ -22,6 +28,8 @@ class HostsTool(Tool):
         else:
             config = HostsConfig.load(HostsConfig.get_default_config_path())
             self.manager = HostManager(config)
+
+        self.backend_router = backend_router
 
     @property
     def name(self) -> str:
@@ -230,13 +238,24 @@ Examples:
             return "Error: 'command' parameter is required for exec action"
 
         try:
-            remote_host = await self.manager.get_or_connect(name)
-            result = await remote_host.exec(command, timeout=timeout)
-            if result["success"]:
-                output = result.get("output") or "(no output)"
-                return f"✓ Command executed successfully on '{name}':\n\n{output}"
-            error = result.get("error") or "Unknown error"
-            return f"✗ Command failed on '{name}':\n\n{error}"
+            # Use backend_router to resolve host (supports localhost detection)
+            if self.backend_router:
+                backend = await self.backend_router.resolve(name)
+                result = await backend.exec(command, timeout=timeout)
+                if result["success"]:
+                    output = result.get("output") or "(no output)"
+                    return f"✓ Command executed successfully on '{name}':\n\n{output}"
+                error = result.get("error") or "Unknown error"
+                return f"✗ Command failed on '{name}':\n\n{error}"
+            else:
+                # Fallback to direct host manager execution
+                remote_host = await self.manager.get_or_connect(name)
+                result = await remote_host.exec(command, timeout=timeout)
+                if result["success"]:
+                    output = result.get("output") or "(no output)"
+                    return f"✓ Command executed successfully on '{name}':\n\n{output}"
+                error = result.get("error") or "Unknown error"
+                return f"✗ Command failed on '{name}':\n\n{error}"
         except KeyError:
             return f"Error: Host '{name}' not found"
         except Exception as e:

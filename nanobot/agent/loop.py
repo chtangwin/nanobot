@@ -153,7 +153,7 @@ class AgentLoop:
         self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
-        self.tools.register(HostsTool(host_manager=self.host_manager))
+        self.tools.register(HostsTool(host_manager=self.host_manager, backend_router=self.backend_router))
         self.tools.register(CompareDirTool(self.backend_router))
         self.tools.register(CompareFileTool(self.backend_router))
         if self.cron_service:
