@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Simple update script for nanobot (systemd one-shot service)
 # 1) pull origin/dev-combined
-# 2) sync deps (keep tts + web extras)
+# 2) sync deps (keep tts + web + notifier extras)
 # 3) restart user service
 
 PATH="${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin"
@@ -20,7 +20,7 @@ echo "[update] pulling latest commit (ff-only) ..."
 git pull --ff-only origin dev-combined
 
 echo "[update] syncing dependencies ..."
-uv sync --extra tts --extra web
+uv sync --extra tts --extra web --extra notifier
 
 echo "[update] restarting nanobot.service ..."
 systemctl --user restart nanobot.service

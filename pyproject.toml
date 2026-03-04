@@ -52,6 +52,10 @@ web = [
 tts = [
     "edge-tts>=7.2.7",
 ]
+notifier = [
+    "twilio>=9.8.5,<10.0.0",
+    "edge-tts>=7.2.7",
+]
 matrix = [
     "matrix-nio[e2e]>=0.25.2",
     "mistune>=3.0.0,<4.0.0",
