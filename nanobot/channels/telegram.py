@@ -521,7 +521,7 @@ class TelegramChannel(BaseChannel):
                             )
                         except Exception as e:
                             logger.warning("Failed to echo transcription: {}", e)
-                        content_parts.append(f"[voice transcription — may contain errors]\n{transcription}")
+                        content_parts.append(f"[voice transcription — treat as approximate user intent, may contain errors]\n{transcription}")
                     else:
                         provider = (self.transcription_config.provider if self.transcription_config else "groq")
                         language = (self.transcription_config.language if self.transcription_config else "")

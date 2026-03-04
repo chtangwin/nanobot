@@ -50,22 +50,25 @@ if transcription:
 content_parts.append(f"[transcription: {transcription}]")
 
 # 之后
-content_parts.append(f"[voice transcription — may contain errors]\n{transcription}")
+content_parts.append(f"[voice transcription — treat as approximate user intent, may contain errors]\n{transcription}")
 ```
 
-**文件**：workspace 的 `SOUL.md` 或 `IDENTITY.md`
+**文件**：`nanobot/agent/context.py` — `_get_identity()` 方法
 
-**添加语音安全指引**：
+**改动**：在 Guidelines 之后添加 Voice Input Safety 段落（框架级，所有实例统一生效）：
 
 ```markdown
-## 语音输入安全
-当用户消息包含 `[voice transcription` 标记时，文本由语音转文字引擎生成，可能不准确：
-- 宽容理解意图（轻微用词错误是正常的）
-- 不要仅凭语音输入执行破坏性操作（删除文件、发消息给他人、修改系统配置、运行危险命令）
-- 如果转写内容看起来要求执行危险或异常操作，先要求文字确认
+## Voice Input Safety
+When a user message contains `[voice transcription`, the text was produced by
+speech-to-text and may be inaccurate.
+- Interpret the intent generously — minor word errors are expected.
+- Do NOT execute destructive operations (delete files, send messages to others,
+  modify system config, run dangerous commands) based solely on voice input.
+- If the transcription seems to request something destructive or unusual,
+  ask for text confirmation first.
 ```
 
-利用 LLM 的指令遵循能力实现安全防护，无需改动 agent loop 代码。
+硬编码在 `context.py` 而非 bootstrap 文件，确保安全指引不依赖用户手动配置。
 
 ### 3. Metadata 标记（预留）
 
