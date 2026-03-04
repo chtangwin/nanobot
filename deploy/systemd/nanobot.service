@@ -10,7 +10,9 @@ Environment=PYTHONUNBUFFERED=1
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/env uv run nanobot gateway
 Restart=always
-RestartSec=3
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=60
 KillSignal=SIGTERM
 TimeoutStopSec=30
 
