@@ -64,9 +64,7 @@ uv sync --extra notifier
       "rate": "+0%",
       "volume": "+0%",
       "pitch": "+0Hz"
-    }
-  },
-  "skills": {
+    },
     "notifier": {
       "defaultChannel": "auto",
       "defaultLanguage": "zh-CN",
@@ -81,7 +79,7 @@ uv sync --extra notifier
 }
 ```
 
-> Telegram token 复用 `channels.telegram.token`，不需要在 `skills.notifier` 重复配置。
+> Telegram token 复用 `channels.telegram.token`，不需要在 `tools.notifier` 重复配置。
 > Telegram 音频 TTS 复用 `tools.tts`（edge-tts）配置。
 > **执行时一律显式传 `--chat-id`（使用当前会话 Chat ID）**，避免发错会话。
 > 支持 camelCase/snake_case；脚本默认读取 `~/.nanobot/config.json`。

@@ -9,7 +9,7 @@ Supports:
 
 Config precedence:
 1) CLI args (phone-number/chat-id/language/parse-mode/channel)
-2) ~/.nanobot/config.json -> skills.notifier + tools.tts + channels.telegram
+2) ~/.nanobot/config.json -> tools.notifier + tools.tts + channels.telegram
 3) Environment variables (fallback)
 """
 
@@ -61,8 +61,8 @@ def _load_notifier_config(config_path: str | None) -> dict[str, Any]:
     path = Path(config_path).expanduser() if config_path else (Path.home() / ".nanobot" / "config.json")
     data = _read_json(path)
 
-    skills = data.get("skills", {}) if isinstance(data, dict) else {}
-    notifier = skills.get("notifier", {}) if isinstance(skills, dict) else {}
+    tools = data.get("tools", {}) if isinstance(data, dict) else {}
+    notifier = tools.get("notifier", {}) if isinstance(tools, dict) else {}
 
     channels = data.get("channels", {}) if isinstance(data, dict) else {}
     channel_tg = channels.get("telegram", {}) if isinstance(channels, dict) else {}
