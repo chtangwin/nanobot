@@ -420,12 +420,13 @@ class TelegramChannel(BaseChannel):
 
     async def _maybe_send_tts(self, chat_id: int, text: str, reply_params) -> None:
         """Send TTS voice reply based on tts_mode."""
-        if self.tts_mode == "off" or not self.tts_config:
-            return
-
         str_id = str(chat_id)
         is_voice_triggered = str_id in self._voice_chats
+        # Always consume the one-shot flag, even when TTS is currently disabled.
         self._voice_chats.discard(str_id)
+
+        if self.tts_mode == "off" or not self.tts_config:
+            return
 
         # auto: only reply with voice when user sent voice
         if self.tts_mode == "auto" and not is_voice_triggered:
