@@ -3,23 +3,34 @@
 import asyncio
 import json
 import os
-import signal
-from pathlib import Path
 import select
+import signal
 import sys
+from pathlib import Path
+
+# Force UTF-8 encoding for Windows console
+if sys.platform == "win32":
+    import locale
+    if sys.stdout.encoding != "utf-8":
+        os.environ["PYTHONIOENCODING"] = "utf-8"
+        # Re-open stdout/stderr with UTF-8 encoding
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 import typer
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.history import FileHistory
-from prompt_toolkit.patch_stdout import patch_stdout
-
-from nanobot import __version__, __logo__
+from nanobot import __logo__, __version__
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
 
@@ -161,9 +172,9 @@ def onboard():
     from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
     from nanobot.utils.helpers import get_workspace_path
-    
+
     config_path = get_config_path()
-    
+
     if config_path.exists():
         console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
         console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
@@ -179,16 +190,16 @@ def onboard():
     else:
         save_config(Config())
         console.print(f"[green]✓[/green] Created config at {config_path}")
-    
+
     # Create workspace
     workspace = get_workspace_path()
-    
+
     if not workspace.exists():
         workspace.mkdir(parents=True, exist_ok=True)
         console.print(f"[green]✓[/green] Created workspace at {workspace}")
-    
+
     sync_workspace_templates(workspace)
-    
+
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
     console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
@@ -202,9 +213,7 @@ def onboard():
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
-    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
-    from nanobot.providers.custom_provider import CustomProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
@@ -215,6 +224,7 @@ def _make_provider(config: Config):
         return OpenAICodexProvider(default_model=model)
 
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
+    from nanobot.providers.custom_provider import CustomProvider
     if provider_name == "custom":
         return CustomProvider(
             api_key=p.api_key if p else "no-key",
@@ -222,6 +232,7 @@ def _make_provider(config: Config):
             default_model=model,
         )
 
+    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.registry import find_by_name
     spec = find_by_name(provider_name)
     if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
@@ -246,36 +257,42 @@ def _make_provider(config: Config):
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the nanobot gateway."""
-    from nanobot.config.loader import load_config, get_data_dir
-    from nanobot.bus.queue import MessageBus
     from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.session.manager import SessionManager
+    from nanobot.config.loader import load_config
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.todos.reminder_service import TodosReminderService
     from nanobot.todos.report_service import TodosReportService
-    
+    from nanobot.session.manager import SessionManager
+
     if verbose:
         import logging
         logging.basicConfig(level=logging.DEBUG)
-    
+
+    config_path = Path(config) if config else None
+    config = load_config(config_path)
+    if workspace:
+        config.agents.defaults.workspace = workspace
+
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    
-    config = load_config()
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
-    
+
     # Create cron service first (callback set after agent creation)
-    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    # Use workspace path for per-instance cron store
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
-    
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
@@ -288,6 +305,7 @@ def gateway(
         memory_window=config.agents.defaults.memory_window,
         reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         todos_config=config.tools.todos,
@@ -297,26 +315,48 @@ def gateway(
         channels_config=config.channels,
         self_update_config=config.gateway.self_update,
     )
-    
+
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
-        response = await agent.process_direct(
-            job.payload.message,
-            session_key=f"cron:{job.id}",
-            channel=job.payload.channel or "cli",
-            chat_id=job.payload.to or "direct",
+        from nanobot.agent.tools.cron import CronTool
+        from nanobot.agent.tools.message import MessageTool
+        reminder_note = (
+            "[Scheduled Task] Timer finished.\n\n"
+            f"Task '{job.name}' has been triggered.\n"
+            f"Scheduled instruction: {job.payload.message}"
         )
-        if job.payload.deliver and job.payload.to:
+
+        # Prevent the agent from scheduling new cron jobs during execution
+        cron_tool = agent.tools.get("cron")
+        cron_token = None
+        if isinstance(cron_tool, CronTool):
+            cron_token = cron_tool.set_cron_context(True)
+        try:
+            response = await agent.process_direct(
+                reminder_note,
+                session_key=f"cron:{job.id}",
+                channel=job.payload.channel or "cli",
+                chat_id=job.payload.to or "direct",
+            )
+        finally:
+            if isinstance(cron_tool, CronTool) and cron_token is not None:
+                cron_tool.reset_cron_context(cron_token)
+
+        message_tool = agent.tools.get("message")
+        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+            return response
+
+        if job.payload.deliver and job.payload.to and response:
             from nanobot.bus.events import OutboundMessage
             await bus.publish_outbound(OutboundMessage(
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to,
-                content=response or ""
+                content=response
             ))
         return response
     cron.on_job = on_cron_job
-    
+
     # Create channel manager
     channels = ChannelManager(config, bus)
 
@@ -393,12 +433,13 @@ def gateway(
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
-    
+
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
-    
+
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+
     if todos_cfg.enabled:
         console.print(f"[green]✓[/green] Todos reminders: every {todos_cfg.reminder_interval_s}s")
     if todos_cfg.enabled and todos_cfg.report_enabled:
@@ -462,7 +503,7 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
-    
+
     asyncio.run(run())
 
 
@@ -481,15 +522,16 @@ def agent(
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
 ):
     """Interact with the agent directly."""
-    from nanobot.config.loader import load_config, get_data_dir
-    from nanobot.bus.queue import MessageBus
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.cron.service import CronService
     from loguru import logger
-    
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.loader import get_data_dir, load_config
+    from nanobot.cron.service import CronService
+
     config = load_config()
     sync_workspace_templates(config.workspace_path)
-    
+
     bus = MessageBus()
     provider = _make_provider(config)
 
@@ -501,7 +543,7 @@ def agent(
         logger.enable("nanobot")
     else:
         logger.disable("nanobot")
-    
+
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -513,6 +555,7 @@ def agent(
         memory_window=config.agents.defaults.memory_window,
         reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
+        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         todos_config=config.tools.todos,
@@ -521,7 +564,7 @@ def agent(
         channels_config=config.channels,
         self_update_config=config.gateway.self_update,
     )
-    
+
     # Show spinner when logs are off (no output to miss); skip when logs are on
     def _thinking_ctx():
         if logs:
@@ -558,12 +601,21 @@ def agent(
         else:
             cli_channel, cli_chat_id = "cli", session_id
 
-        def _exit_on_sigint(signum, frame):
+        def _handle_signal(signum, frame):
+            sig_name = signal.Signals(signum).name
             _restore_terminal()
-            console.print("\nGoodbye!")
-            os._exit(0)
+            console.print(f"\nReceived {sig_name}, goodbye!")
+            sys.exit(0)
 
-        signal.signal(signal.SIGINT, _exit_on_sigint)
+        signal.signal(signal.SIGINT, _handle_signal)
+        signal.signal(signal.SIGTERM, _handle_signal)
+        # SIGHUP is not available on Windows
+        if hasattr(signal, 'SIGHUP'):
+            signal.signal(signal.SIGHUP, _handle_signal)
+        # Ignore SIGPIPE to prevent silent process termination when writing to closed pipes
+        # SIGPIPE is not available on Windows
+        if hasattr(signal, 'SIGPIPE'):
+            signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
             bus_task = asyncio.create_task(agent_loop.run())
@@ -697,7 +749,7 @@ def channels_status():
         "✓" if mc.enabled else "✗",
         mc_base
     )
-    
+
     # Telegram
     tg = config.channels.telegram
     tg_config = f"token: {tg.token[:10]}..." if tg.token else "[dim]not configured[/dim]"
@@ -750,57 +802,57 @@ def _get_bridge_dir() -> Path:
     """Get the bridge directory, setting it up if needed."""
     import shutil
     import subprocess
-    
+
     # User's bridge location
     user_bridge = Path.home() / ".nanobot" / "bridge"
-    
+
     # Check if already built
     if (user_bridge / "dist" / "index.js").exists():
         return user_bridge
-    
+
     # Check for npm
     if not shutil.which("npm"):
         console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
         raise typer.Exit(1)
-    
+
     # Find source bridge: first check package data, then source dir
     pkg_bridge = Path(__file__).parent.parent / "bridge"  # nanobot/bridge (installed)
     src_bridge = Path(__file__).parent.parent.parent / "bridge"  # repo root/bridge (dev)
-    
+
     source = None
     if (pkg_bridge / "package.json").exists():
         source = pkg_bridge
     elif (src_bridge / "package.json").exists():
         source = src_bridge
-    
+
     if not source:
         console.print("[red]Bridge source not found.[/red]")
         console.print("Try reinstalling: pip install --force-reinstall nanobot")
         raise typer.Exit(1)
-    
+
     console.print(f"{__logo__} Setting up bridge...")
-    
+
     # Copy to user directory
     user_bridge.parent.mkdir(parents=True, exist_ok=True)
     if user_bridge.exists():
         shutil.rmtree(user_bridge)
     shutil.copytree(source, user_bridge, ignore=shutil.ignore_patterns("node_modules", "dist"))
-    
+
     # Install and build
     try:
         console.print("  Installing dependencies...")
         subprocess.run(["npm", "install"], cwd=user_bridge, check=True, capture_output=True)
-        
+
         console.print("  Building...")
         subprocess.run(["npm", "run", "build"], cwd=user_bridge, check=True, capture_output=True)
-        
+
         console.print("[green]✓[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Build failed: {e}[/red]")
         if e.stderr:
             console.print(f"[dim]{e.stderr.decode()[:500]}[/dim]")
         raise typer.Exit(1)
-    
+
     return user_bridge
 
 
@@ -808,18 +860,19 @@ def _get_bridge_dir() -> Path:
 def channels_login():
     """Link device via QR code."""
     import subprocess
+
     from nanobot.config.loader import load_config
-    
+
     config = load_config()
     bridge_dir = _get_bridge_dir()
-    
+
     console.print(f"{__logo__} Starting bridge...")
     console.print("Scan the QR code to connect.\n")
-    
+
     env = {**os.environ}
     if config.channels.whatsapp.bridge_token:
         env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
-    
+
     try:
         subprocess.run(["npm", "start"], cwd=bridge_dir, check=True, env=env)
     except subprocess.CalledProcessError as e:
@@ -1051,7 +1104,7 @@ def cron_run(
 @app.command()
 def status():
     """Show nanobot status."""
-    from nanobot.config.loader import load_config, get_config_path
+    from nanobot.config.loader import get_config_path, load_config
 
     config_path = get_config_path()
     config = load_config()
@@ -1066,7 +1119,7 @@ def status():
         from nanobot.providers.registry import PROVIDERS
 
         console.print(f"Model: {config.agents.defaults.model}")
-        
+
         # Check API keys from registry
         for spec in PROVIDERS:
             p = getattr(config.providers, spec.name, None)

@@ -12,6 +12,8 @@ from nanobot.agent.tools.base import Tool
 
 
 class ReadFileTool(Tool):
+    _MAX_CHARS = 128_000  # ~128 KB — prevents OOM from reading huge files into LLM context
+
     def __init__(self, backend_router: ExecutionBackendRouter):
         self.backend_router = backend_router
 
@@ -39,7 +41,13 @@ class ReadFileTool(Tool):
             backend = await self.backend_router.resolve(host)
             result = await backend.read_file(path)
             if result.get("success"):
-                return result.get("content") or ""
+                content = result.get("content") or ""
+                if len(content) > self._MAX_CHARS:
+                    return (
+                        content[: self._MAX_CHARS]
+                        + f"\n\n... (truncated — file is {len(content):,} chars, limit {self._MAX_CHARS:,})"
+                    )
+                return content
             return f"Error: {result.get('error') or 'Failed to read file'}"
         except KeyError:
             return f"Error: Host '{host}' not found"
@@ -96,7 +104,7 @@ class EditFileTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Edit a file by replacing old_text with new_text. Use host to edit on a remote host."
+        return "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file. Use host to edit on a remote host."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -128,7 +136,35 @@ class EditFileTool(Tool):
         except KeyError:
             return f"Error: Host '{host}' not found"
         except Exception as e:
-            return f"Error editing file: {e}"
+            return f"Error editing file: {str(e)}"
+
+    @staticmethod
+    def _not_found_message(old_text: str, content: str, path: str) -> str:
+        """Build a helpful error when old_text is not found."""
+        lines = content.splitlines(keepends=True)
+        old_lines = old_text.splitlines(keepends=True)
+        window = len(old_lines)
+
+        best_ratio, best_start = 0.0, 0
+        for i in range(max(1, len(lines) - window + 1)):
+            ratio = difflib.SequenceMatcher(None, old_lines, lines[i : i + window]).ratio()
+            if ratio > best_ratio:
+                best_ratio, best_start = ratio, i
+
+        if best_ratio > 0.5:
+            diff = "\n".join(
+                difflib.unified_diff(
+                    old_lines,
+                    lines[best_start : best_start + window],
+                    fromfile="old_text (provided)",
+                    tofile=f"{path} (actual, line {best_start + 1})",
+                    lineterm="",
+                )
+            )
+            return f"Error: old_text not found in {path}.\nBest match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
+        return (
+            f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+        )
 
 
 class ListDirTool(Tool):
