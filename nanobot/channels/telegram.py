@@ -336,6 +336,10 @@ class TelegramChannel(BaseChannel):
                 else:
                     await self._send_text(chat_id, chunk, reply_params)
 
+            # TTS voice reply for voice-triggered chats
+            if not is_progress:
+                await self._maybe_send_tts(chat_id, msg.content, reply_params)
+
     async def _send_text(self, chat_id: int, text: str, reply_params=None) -> None:
         """Send a plain text message with HTML fallback."""
         try:
@@ -371,9 +375,6 @@ class TelegramChannel(BaseChannel):
             pass
         await self._send_text(chat_id, text, reply_params)
 
-            # TTS voice reply for voice-triggered chats
-            await self._maybe_send_tts(chat_id, msg.content, reply_params)
-    
     async def _transcribe_media(
         self, file_path: str, media_type: str, mime_type: str | None = None
     ) -> str:
