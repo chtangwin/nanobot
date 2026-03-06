@@ -32,7 +32,10 @@ async def fetch_http(url: str, cfg: FetchConfig) -> tuple[int | None, str, str]:
     for attempt in range(cfg.http_retries + 1):
         try:
             async with httpx.AsyncClient(
-                timeout=timeout, follow_redirects=True, headers=DEFAULT_HEADERS
+                timeout=timeout,
+                follow_redirects=True,
+                headers=DEFAULT_HEADERS,
+                proxy=cfg.proxy,
             ) as client:
                 resp = await client.get(url)
                 html = resp.text or ""

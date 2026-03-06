@@ -21,6 +21,9 @@ DEFAULT_HEADERS = {
 class FetchConfig:
     """Configuration for the fetch pipeline."""
 
+    # Network
+    proxy: str | None = None
+
     # HTTP fast path
     http_connect_timeout_s: float = 3.0
     http_read_timeout_s: float = 7.0

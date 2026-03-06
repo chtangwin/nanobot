@@ -76,8 +76,9 @@ class WebFetchTool(Tool):
         "required": ["url"],
     }
 
-    def __init__(self, max_chars: int = 50000):
+    def __init__(self, max_chars: int = 50000, proxy: str | None = None):
         self.max_chars = max_chars
+        self.proxy = proxy
 
     async def execute(
         self,
@@ -100,7 +101,7 @@ class WebFetchTool(Tool):
             )
 
         # Build config
-        cfg = FetchConfig()
+        cfg = FetchConfig(proxy=self.proxy)
 
         try:
             result = await robust_fetch(

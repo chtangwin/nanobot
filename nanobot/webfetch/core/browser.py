@@ -126,7 +126,10 @@ async def fetch_browser(
         ) from exc
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        launch_kwargs = {"headless": True}
+        if cfg.proxy:
+            launch_kwargs["proxy"] = {"server": cfg.proxy}
+        browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context(
             user_agent=DEFAULT_HEADERS["User-Agent"], locale="en-US"
         )
