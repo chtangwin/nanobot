@@ -61,7 +61,10 @@ class HostsConfig:
         if self.config_file:
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
             data = {"hosts": {name: cfg.to_dict() for name, cfg in self.hosts.items()}}
-            self.config_file.write_text(json.dumps(data, indent=2))
+            self.config_file.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
 
     @classmethod
     def load(cls, config_file: Path) -> "HostsConfig":
@@ -70,7 +73,7 @@ class HostsConfig:
             cfg.save()
             return cfg
 
-        data = json.loads(config_file.read_text())
+        data = json.loads(config_file.read_text(encoding="utf-8"))
         raw_hosts = data.get("hosts") or {}
         hosts = {name: HostConfig.from_dict(name, item) for name, item in raw_hosts.items()}
         return cls(hosts=hosts, config_file=config_file)
