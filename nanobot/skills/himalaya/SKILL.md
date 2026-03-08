@@ -1,11 +1,53 @@
 ---
 name: himalaya
-description: "CLI to manage emails via IMAP/SMTP. Use `himalaya` to list, read, search, move, delete, and organize emails from the terminal. Supports Gmail, Yahoo, Outlook, iCloud, and any IMAP provider. Use when the user asks to check email, read messages, search inbox, move/delete emails, manage folders, or download attachments. Sending/replying/forwarding is disabled for safety."
+description: "CLI for direct manual email operations via IMAP/SMTP. Use `himalaya` to list folders, read specific messages, search inboxes, inspect accounts, move/copy/delete individual emails, manage folders, or download attachments from the terminal. Supports Gmail, Yahoo, Outlook, iCloud, and any IMAP provider. Use when the user asks for one-off email inspection or explicit manual operations. Do not use for Mailkeeper-style model-based daily triage, incremental processing, scheduled mailbox routing, or batch preview/apply workflows. Sending/replying/forwarding is disabled for safety."
 metadata: '{"nanobot":{"emoji":"📧","requires":{"bins":["himalaya"]}}}'
 ---
 # Himalaya Email CLI
 
 Himalaya is a CLI email client that lets you manage emails from the terminal using IMAP, SMTP, Notmuch, or Sendmail backends.
+
+Use this skill for direct/manual mailbox operations.
+Use `mailkeeper` instead for recurring model-based triage, daily processing, dry-run/apply workflows, and scheduled mailbox routing.
+
+## Typical trigger phrases
+
+Prefer `himalaya` when requests sound like:
+
+English:
+- list my mail folders
+- read the latest email
+- search inbox for a sender or subject
+- inspect a specific message
+- move this email manually
+- copy one message to another folder
+- download an attachment
+- check my himalaya account config
+
+中文：
+- 列出邮箱文件夹
+- 查看最新邮件
+- 按发件人或主题搜索邮件
+- 查看某封邮件
+- 手动移动邮件
+- 复制邮件到另一个文件夹
+- 下载附件
+- 检查 Himalaya 账户配置
+
+Prefer `mailkeeper` instead when the request is about:
+
+- daily mailbox triage
+- automated inbox sorting
+- dry-run / apply batch routing
+- incremental processing of new mail
+- first-time state initialization
+- recurring scheduled mailbox handling
+- 每日邮箱分拣
+- 自动整理收件箱
+- dry-run / apply 批量路由
+- 增量处理新邮件
+- 初始化处理状态
+- 定时处理邮箱
 
 ## References
 
