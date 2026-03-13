@@ -1,5 +1,6 @@
 """Shell execution tool."""
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,9 @@ from nanobot.agent.tools.base import Tool
 
 class ExecTool(Tool):
     """Tool to execute shell commands."""
+
+    _MAX_TIMEOUT = 600
+    _MAX_OUTPUT = 50_000
 
     def __init__(
         self,
@@ -58,9 +62,12 @@ class ExecTool(Tool):
             "properties": {
                 "command": {"type": "string", "description": "The shell command to execute"},
                 "working_dir": {"type": "string", "description": "Optional working directory"},
-                "host": {
-                    "type": "string",
-                    "description": "Remote host name. If omitted, run locally.",
+                "host": {"type": "string", "description": "Remote host name. If omitted, run locally."},
+                "timeout": {
+                    "type": "integer",
+                    "description": "Optional timeout in seconds (default 60, max 600)",
+                    "minimum": 1,
+                    "maximum": 600,
                 },
             },
             "required": ["command"],
@@ -71,6 +78,7 @@ class ExecTool(Tool):
         command: str,
         working_dir: str | None = None,
         host: str | None = None,
+        timeout: int | None = None,
         **kwargs: Any,
     ) -> str:
         cwd = working_dir or self.working_dir
@@ -81,7 +89,11 @@ class ExecTool(Tool):
 
         try:
             backend = await self.backend_router.resolve(host)
-            result = await backend.exec(command, working_dir=cwd, timeout=self.timeout)
+            result = await backend.exec(
+                command,
+                working_dir=cwd,
+                timeout=min(timeout or self.timeout, self._MAX_TIMEOUT),
+            )
         except KeyError:
             return f"Error: Host '{host}' not found. Use 'hosts action=\"add\"' to add it first"
         except Exception as e:
@@ -102,11 +114,9 @@ class ExecTool(Tool):
             prefix_lines.append(f"🌐 Host: {host}")
         prefix_lines.append(f"📁 CWD: {cwd or '(default)'}")
         prefix_lines.append(f"⚡ Cmd: {command}")
-
         rendered = "\n".join(prefix_lines) + "\n\n" + output
-        max_len = 50000
-        if len(rendered) > max_len:
-            rendered = rendered[:max_len] + f"\n... (truncated, {len(rendered) - max_len} more chars)"
+        if len(rendered) > self._MAX_OUTPUT:
+            rendered = rendered[: self._MAX_OUTPUT] + f"\n... (truncated, {len(rendered) - self._MAX_OUTPUT} more chars)"
         return rendered
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
@@ -125,10 +135,10 @@ class ExecTool(Tool):
                 return "Error: Command blocked by safety guard (path traversal detected)"
 
             cwd_path = Path(cwd).resolve()
-
             for raw in self._extract_absolute_paths(cmd):
                 try:
-                    p = Path(raw.strip()).resolve()
+                    expanded = os.path.expandvars(raw.strip())
+                    p = Path(expanded).expanduser().resolve()
                 except Exception:
                     continue
                 if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
@@ -138,6 +148,7 @@ class ExecTool(Tool):
 
     @staticmethod
     def _extract_absolute_paths(command: str) -> list[str]:
-        win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]+", command)   # Windows: C:\...
-        posix_paths = re.findall(r"(?:^|[\s|>])(/[^\s\"'>]+)", command) # POSIX: /absolute only
-        return win_paths + posix_paths
+        win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]+", command)
+        posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command)
+        home_paths = re.findall(r"(?:^|[\s|>'\"])(~[^\s\"'>;|<]*)", command)
+        return win_paths + posix_paths + home_paths

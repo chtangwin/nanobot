@@ -11,7 +11,7 @@ from typing import Any
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.redaction import redact_content, redact_text
-from nanobot.utils.helpers import detect_image_mime
+from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
 
 class ContextBuilder:
@@ -26,7 +26,6 @@ class ContextBuilder:
         self.skills = SkillsLoader(workspace)
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
         bootstrap = self._load_bootstrap_files()
@@ -35,8 +34,7 @@ class ContextBuilder:
 
         memory = self.memory.get_memory_context()
         if memory:
-            memory = redact_text(memory)
-            parts.append(f"# Memory\n\n{memory}")
+            parts.append(f"# Memory\n\n{redact_text(memory)}")
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -46,20 +44,34 @@ class ContextBuilder:
 
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
-            parts.append(f"""# Skills
+            parts.append(
+                f"""# Skills
 
 The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
+Skills with available=\"false\" need dependencies installed first - you can try installing them with apt/brew.
 
-{skills_summary}""")
+{skills_summary}"""
+            )
 
         return "\n\n---\n\n".join(parts)
 
     def _get_identity(self) -> str:
-        """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
+
+        platform_policy = ""
+        if system == "Windows":
+            platform_policy = """## Platform Policy (Windows)
+- You are running on Windows. Do not assume GNU tools like `grep`, `sed`, or `awk` exist.
+- Prefer Windows-native commands or file tools when they are more reliable.
+- If terminal output is garbled, retry with UTF-8 output enabled.
+"""
+        else:
+            platform_policy = """## Platform Policy (POSIX)
+- You are running on a POSIX system. Prefer UTF-8 and standard shell tools.
+- Use file tools when they are simpler or more reliable than shell commands.
+"""
 
         return f"""# nanobot 🐈
 
@@ -73,6 +85,8 @@ Your workspace is at: {workspace_path}
 - Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
 - History log: {workspace_path}/memory/HISTORY.md (grep-searchable)
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
+
+{platform_policy}
 
 ## nanobot Guidelines
 - State intent before tool calls, but NEVER predict or claim results before receiving them.
@@ -91,7 +105,6 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
 
     @staticmethod
     def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
-        """Build untrusted runtime metadata block for injection before the user message."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = time.strftime("%Z") or "UTC"
         lines = [f"Current Time: {now} ({tz})"]
@@ -100,15 +113,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
 
     def _load_bootstrap_files(self) -> str:
-        """Load all bootstrap files from workspace."""
         parts = []
-
         for filename in self.BOOTSTRAP_FILES:
             file_path = self.workspace / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
                 parts.append(f"## {filename}\n\n{content}")
-
         return "\n\n".join(parts) if parts else ""
 
     def build_messages(
@@ -120,28 +130,21 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         channel: str | None = None,
         chat_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
         user_content = self._build_user_content(current_message, media)
 
-        # Merge runtime context and user content into a single user message
-        # to avoid consecutive same-role messages that some providers reject.
         if isinstance(user_content, str):
             merged = f"{runtime_ctx}\n\n{user_content}"
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
-        messages = [
+        return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
             *history,
             {"role": "user", "content": merged},
         ]
-        
-        
-        return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
         text = redact_text(text) if isinstance(text, str) else text
         if not media:
             return text
@@ -152,7 +155,6 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             if not p.is_file():
                 continue
             raw = p.read_bytes()
-            # Detect real MIME type from magic bytes; fallback to filename guess
             mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
             if not mime or not mime.startswith("image/"):
                 continue
@@ -164,27 +166,30 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         return images + [{"type": "text", "text": text}]
 
     def add_tool_result(
-        self, messages: list[dict[str, Any]],
-        tool_call_id: str, tool_name: str, result: str,
+        self,
+        messages: list[dict[str, Any]],
+        tool_call_id: str,
+        tool_name: str,
+        result: str,
     ) -> list[dict[str, Any]]:
-        """Add a tool result to the message list, with redaction."""
-        # Redact sensitive data from tool outputs
         result = redact_content(result) if isinstance(result, str) else result
         messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
         return messages
 
     def add_assistant_message(
-        self, messages: list[dict[str, Any]],
+        self,
+        messages: list[dict[str, Any]],
         content: str | None,
         tool_calls: list[dict[str, Any]] | None = None,
         reasoning_content: str | None = None,
         thinking_blocks: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
-        """Add an assistant message to the message list."""
-        msg: dict[str, Any] = {"role": "assistant", "content": content}
-        if tool_calls:
-            msg["tool_calls"] = tool_calls
-        if reasoning_content is not None:
-            msg["reasoning_content"] = reasoning_content
-        messages.append(msg)
+        messages.append(
+            build_assistant_message(
+                content,
+                tool_calls=tool_calls,
+                reasoning_content=reasoning_content,
+                thinking_blocks=thinking_blocks,
+            )
+        )
         return messages
