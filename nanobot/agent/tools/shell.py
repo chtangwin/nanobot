@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from nanobot.agent.backends.local import LocalExecutionBackend
 from nanobot.agent.backends.router import ExecutionBackendRouter
 from nanobot.agent.tools.base import Tool
 
@@ -17,7 +18,7 @@ class ExecTool(Tool):
 
     def __init__(
         self,
-        backend_router: ExecutionBackendRouter,
+        backend_router: ExecutionBackendRouter | None = None,
         timeout: int = 60,
         working_dir: str | None = None,
         deny_patterns: list[str] | None = None,
@@ -25,6 +26,11 @@ class ExecTool(Tool):
         restrict_to_workspace: bool = False,
         path_append: str = "",
     ):
+        if backend_router is None:
+            backend_router = ExecutionBackendRouter(
+                local_backend=LocalExecutionBackend(path_append=path_append),
+                host_manager=None,
+            )
         self.backend_router = backend_router
         self.timeout = timeout
         self.working_dir = working_dir
@@ -114,6 +120,7 @@ class ExecTool(Tool):
             prefix_lines.append(f"🌐 Host: {host}")
         prefix_lines.append(f"📁 CWD: {cwd or '(default)'}")
         prefix_lines.append(f"⚡ Cmd: {command}")
+
         rendered = "\n".join(prefix_lines) + "\n\n" + output
         if len(rendered) > self._MAX_OUTPUT:
             rendered = rendered[: self._MAX_OUTPUT] + f"\n... (truncated, {len(rendered) - self._MAX_OUTPUT} more chars)"
@@ -135,6 +142,7 @@ class ExecTool(Tool):
                 return "Error: Command blocked by safety guard (path traversal detected)"
 
             cwd_path = Path(cwd).resolve()
+
             for raw in self._extract_absolute_paths(cmd):
                 try:
                     expanded = os.path.expandvars(raw.strip())

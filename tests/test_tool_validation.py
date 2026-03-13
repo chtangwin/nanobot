@@ -368,25 +368,24 @@ def test_cast_params_single_value_not_auto_wrapped_to_array() -> None:
 # --- ExecTool enhancement tests ---
 
 
-async def test_exec_always_returns_exit_code() -> None:
-    """Exit code should appear in output even on success (exit 0)."""
+async def test_exec_success_renders_router_style_output() -> None:
+    """Success output should keep the router-style prefix and command context."""
     tool = ExecTool()
     result = await tool.execute(command="echo hello")
-    assert "Exit code: 0" in result
+    assert "🔧 Tool: exec" in result
+    assert "⚡ Cmd: echo hello" in result
     assert "hello" in result
 
 
-async def test_exec_head_tail_truncation() -> None:
-    """Long output should preserve both head and tail."""
+async def test_exec_head_tail_truncation(tmp_path) -> None:
+    """Long output should be truncated without relying on oversized command lines."""
     tool = ExecTool()
-    # Generate output that exceeds _MAX_OUTPUT
-    big = "A" * 6000 + "\n" + "B" * 6000
-    result = await tool.execute(command=f"echo '{big}'")
-    assert "chars truncated" in result
-    # Head portion should start with As
-    assert result.startswith("A")
-    # Tail portion should end with the exit code which comes after Bs
-    assert "Exit code:" in result
+    script = tmp_path / "big_output.py"
+    script.write_text('print("A" * 40000)\nprint("B" * 40000)\n', encoding="utf-8")
+    result = await tool.execute(command=f'uv run python "{script}"')
+    assert "truncated" in result
+    assert "AAAA" in result
+    assert "BBBB" in result
 
 
 async def test_exec_timeout_parameter() -> None:
@@ -401,6 +400,6 @@ async def test_exec_timeout_parameter() -> None:
 async def test_exec_timeout_capped_at_max() -> None:
     """Timeout values above _MAX_TIMEOUT should be clamped."""
     tool = ExecTool()
-    # Should not raise — just clamp to 600
     result = await tool.execute(command="echo ok", timeout=9999)
-    assert "Exit code: 0" in result
+    assert "🔧 Tool: exec" in result
+    assert "ok" in result
